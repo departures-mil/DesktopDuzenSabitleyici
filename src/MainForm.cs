@@ -16,7 +16,7 @@ public sealed class MainForm : Form
     readonly WinTimer updateTimer = new() { Interval = 6 * 60 * 60 * 1000 };
     readonly WinTimer autoSyncTimer = new() { Interval = 5 * 60 * 1000 };
 
-    bool startHidden, reallyExit, half, loading = true, started, syncing;
+    bool startHidden, reallyExit, half, loading = true, started, syncing, shutdownSaved;
     DateTime? lastSyncedSave;
     UpdateInfo? update;
 
@@ -28,7 +28,8 @@ public sealed class MainForm : Form
     Button bProtect = null!, bSaveNow = null!, bRestore = null!;
     Label hSettings = null!, lMode = null!, lLang = null!;
     RadioButton rProp = null!, rProf = null!;
-    CheckBox cAuto = null!, cStartup = null!;
+    CheckBox cAuto = null!, cStartup = null!, cAutoSave = null!;
+    Label lSaveInfo = null!;
     ComboBox cLang = null!;
     Label hProfiles = null!, hLog = null!;
     ListView lv = null!;
@@ -102,6 +103,7 @@ public sealed class MainForm : Form
     protected override void OnHandleCreated(EventArgs e)
     {
         base.OnHandleCreated(e);
+        Win32.RegisterHotKey(Handle, 1, 0x0001 | 0x0002 | 0x4000, (uint)Keys.S); // Ctrl+Alt+S (no repeat)
         if (started) return;
         started = true;
         BeginInvoke(async () =>
@@ -152,7 +154,18 @@ public sealed class MainForm : Form
 
     protected override void WndProc(ref Message m)
     {
-        const int WM_NCHITTEST = 0x84;
+        const int WM_NCHITTEST = 0x84, WM_QUERYENDSESSION = 0x11, WM_HOTKEY = 0x312;
+        if (m.Msg == WM_QUERYENDSESSION && !shutdownSaved)
+        {
+            shutdownSaved = true;
+            guard.SaveBeforeShutdown("log_shutdown");
+        }
+        if (m.Msg == WM_HOTKEY && (int)m.WParam == 1)
+        {
+            guard.SaveNow();
+            OnLog("log_hotkey", Array.Empty<object>());
+            tray.ShowBalloonTip(1500, Lang.T("app_title"), Lang.T("log_hotkey"), ToolTipIcon.Info);
+        }
         base.WndProc(ref m);
         if (m.Msg == WM_NCHITTEST && half && WindowState == FormWindowState.Normal)
         {
@@ -201,6 +214,12 @@ public sealed class MainForm : Form
             HideToTray();
             return;
         }
+        if (e.CloseReason == CloseReason.WindowsShutDown && !shutdownSaved)
+        {
+            shutdownSaved = true;
+            guard.SaveBeforeShutdown("log_shutdown");
+        }
+        try { Win32.UnregisterHotKey(Handle, 1); } catch { }
         tray.Visible = false;
         guard.Dispose();
         base.OnFormClosing(e);
@@ -208,6 +227,7 @@ public sealed class MainForm : Form
 
     void ExitApp()
     {
+        if (settings.Protect && !shutdownSaved) { shutdownSaved = true; guard.SaveBeforeShutdown("log_saved"); }
         reallyExit = true;
         Close();
     }
@@ -330,7 +350,10 @@ public sealed class MainForm : Form
         rProp = new RadioButton { AutoSize = true, ForeColor = Theme.Text, Margin = new Padding(0, 4, 0, 2) };
         rProf = new RadioButton { AutoSize = true, ForeColor = Theme.Text, Margin = new Padding(0, 2, 0, 10) };
         cAuto = new CheckBox { AutoSize = true, ForeColor = Theme.Text, Margin = new Padding(0, 4, 0, 4) };
-        cStartup = new CheckBox { AutoSize = true, ForeColor = Theme.Text, Margin = new Padding(0, 4, 0, 10) };
+        cStartup = new CheckBox { AutoSize = true, ForeColor = Theme.Text, Margin = new Padding(0, 4, 0, 4) };
+        cAutoSave = new CheckBox { AutoSize = true, ForeColor = Theme.Text, Margin = new Padding(0, 4, 0, 4) };
+        lSaveInfo = L(new Font("Segoe UI", 9f), Theme.Sub);
+        lSaveInfo.Margin = new Padding(0, 2, 0, 10);
         lLang = L(new Font("Segoe UI Semibold", 10f), Theme.Sub);
         cLang = new ComboBox
         {
@@ -342,6 +365,8 @@ public sealed class MainForm : Form
         rProf.Checked = settings.Mode == 1;
         cAuto.Checked = settings.DisableAutoArrange;
         cStartup.Checked = settings.StartWithWindows;
+        cAutoSave.Checked = settings.AutoSave;
+        cAutoSave.CheckedChanged += (_, _) => { if (!loading) { settings.AutoSave = cAutoSave.Checked; Storage.SaveSettings(settings); } };
         cLang.SelectedIndex = Math.Max(0, Array.FindIndex(Lang.Languages, x => x.code == settings.Lang));
         rProp.CheckedChanged += (_, _) => { if (!loading && rProp.Checked) { settings.Mode = 0; Storage.SaveSettings(settings); } };
         rProf.CheckedChanged += (_, _) => { if (!loading && rProf.Checked) { settings.Mode = 1; Storage.SaveSettings(settings); } };
@@ -360,7 +385,7 @@ public sealed class MainForm : Form
             Storage.SaveSettings(settings);
             ApplyLanguage();
         };
-        fset.Controls.AddRange(new Control[] { hSettings, lMode, rProp, rProf, cAuto, cStartup, lLang, cLang });
+        fset.Controls.AddRange(new Control[] { hSettings, lMode, rProp, rProf, cAuto, cAutoSave, cStartup, lSaveInfo, lLang, cLang });
 
         // profiles card
         var tp = new TableLayoutPanel { ColumnCount = 1, RowCount = 3, BackColor = Theme.Card };
@@ -455,6 +480,8 @@ public sealed class MainForm : Form
         rProf.Text = Lang.T("mode_prof");
         cAuto.Text = Lang.T("autoarr");
         cStartup.Text = Lang.T("startup");
+        cAutoSave.Text = Lang.T("autosave");
+        lSaveInfo.Text = Lang.T("save_info");
         lLang.Text = Lang.T("language");
         hProfiles.Text = Lang.T("profiles_hdr");
         lv.Columns[0].Text = Lang.T("col_display");

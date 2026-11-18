@@ -38,6 +38,7 @@ public sealed class Settings
     public int Mode { get; set; } = 0;
     public bool StartWithWindows { get; set; } = true;
     public bool DisableAutoArrange { get; set; } = true;
+    public bool AutoSave { get; set; } = true;
     public string? TokenEnc { get; set; }
     public string? GistId { get; set; }
     public bool TrayHintShown { get; set; }

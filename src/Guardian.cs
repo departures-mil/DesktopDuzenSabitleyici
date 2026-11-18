@@ -14,6 +14,12 @@ public sealed class Guardian : IDisposable
     readonly Settings settings;
     readonly WinTimer tick = new() { Interval = 1500 };
     readonly WinTimer restoreTimer = new();
+    readonly WinTimer autoSaveTimer = new() { Interval = 30 * 60 * 1000 };
+
+    // Last reading that matched the saved layout, with the screen it was taken on.
+    List<IconPos>? lastStable;
+    string lastStableKey = "";
+    List<MonitorInfo> lastStableMons = new();
 
     string lastKey = "";
     IntPtr lastViewHwnd;
@@ -39,6 +45,7 @@ public sealed class Guardian : IDisposable
         this.settings = settings;
         tick.Tick += (_, _) => OnTick();
         restoreTimer.Tick += (_, _) => OnRestoreStep();
+        autoSaveTimer.Tick += (_, _) => AutoSave();
         if (store.Master != null) LastSave = store.Master.SavedUtc.ToLocalTime();
     }
 
@@ -46,6 +53,7 @@ public sealed class Guardian : IDisposable
     {
         Monitors = DisplayInfo.GetMonitors();
         lastKey = DisplayInfo.KeyOf(Monitors);
+        SystemEvents.DisplaySettingsChanging += OnSystemDisplayChanged;
         SystemEvents.DisplaySettingsChanged += OnSystemDisplayChanged;
         SystemEvents.PowerModeChanged += OnPower;
         Emit("log_started", Friendly());
@@ -54,6 +62,7 @@ public sealed class Guardian : IDisposable
         if (settings.Protect && store.Master != null && store.LastKey != "" && store.LastKey != lastKey)
             ScheduleRestore(3000);
         tick.Start();
+        autoSaveTimer.Start();
     }
 
     string Friendly() => DisplayInfo.Friendly(Monitors, Lang.T("primary"));
@@ -65,6 +74,7 @@ public sealed class Guardian : IDisposable
     void OnPower(object? s, PowerModeChangedEventArgs e)
     {
         if (e.Mode == PowerModes.Resume) { Emit("log_resume"); CheckDisplay(); }
+        else if (e.Mode == PowerModes.Suspend) SaveBeforeShutdown("log_sleep");
     }
 
     void CheckDisplay()
@@ -72,6 +82,7 @@ public sealed class Guardian : IDisposable
         var mons = DisplayInfo.GetMonitors();
         var key = DisplayInfo.KeyOf(mons);
         if (key == lastKey) return;
+        PreserveBeforeChange();
         Monitors = mons;
         lastKey = key;
         Emit("log_changed", Friendly());
@@ -106,17 +117,19 @@ public sealed class Guardian : IDisposable
             baseline = map;
             if (store.Master == null) { Save(cur); Emit("log_saved", cur.Count); }
             else if (store.LastKey == "") { store.LastKey = lastKey; Storage.SaveStore(store); }
+            MarkStable(cur);
             return;
         }
 
         var (moved, membership) = Compare(baseline, map);
-        if (!moved && !membership) { candidate = null; return; }
+        if (!moved && !membership) { candidate = null; MarkStable(cur); return; }
 
         if (!moved)
         {
             // Icons were only added or removed: keep everything else, just remember the new set.
             baseline = map;
             Save(cur);
+            MarkStable(cur);
             return;
         }
 
@@ -126,9 +139,73 @@ public sealed class Guardian : IDisposable
             baseline = map;
             candidate = null;
             Save(cur);
+            MarkStable(cur);
             Emit("log_saved", cur.Count);
         }
         else candidate = map;
+    }
+
+    void MarkStable(List<IconPos> cur)
+    {
+        lastStable = cur;
+        lastStableKey = lastKey;
+        lastStableMons = Monitors;
+    }
+
+    /// <summary>
+    /// The screen is about to change (or has just changed): store the last good layout of the
+    /// old screen first, so Windows' reshuffle can never overwrite it.
+    /// </summary>
+    void PreserveBeforeChange()
+    {
+        if (!settings.Protect || Busy || lastStable == null || lastStable.Count == 0 || lastStableKey != lastKey) return;
+        var layout = LayoutEngine.Capture(lastStable, lastStableMons, lastStableKey,
+            DisplayInfo.Friendly(lastStableMons, Lang.T("primary")));
+        store.Master = layout;
+        store.Profiles[lastStableKey] = layout;
+        store.LastKey = lastStableKey;
+        Storage.SaveStore(store);
+        LastSave = DateTime.Now;
+        lastStable = null;
+        Emit("log_presave", layout.Icons.Count);
+    }
+
+    /// <summary>Every 30 minutes: save the current layout (only when nothing is being restored).</summary>
+    void AutoSave()
+    {
+        if (!settings.Protect || !settings.AutoSave || Busy || DateTime.Now < suppressUntil) return;
+        try
+        {
+            if (DisplayInfo.CurrentKey() != lastKey) return;
+            var cur = DesktopIcons.Read();
+            if (cur.Count == 0) return;
+            baseline = ToMap(cur);
+            candidate = null;
+            Save(cur);
+            MarkStable(cur);
+            Emit("log_autosave", cur.Count);
+        }
+        catch { }
+    }
+
+    /// <summary>Windows is shutting down, restarting, signing out or going to sleep: save right now.</summary>
+    public void SaveBeforeShutdown(string reasonKey)
+    {
+        if (Busy) return; // a restore is running: the saved layout is already the right one
+        // Reading the desktop can be refused while Windows is asking apps to close
+        // (no outgoing COM calls inside that message), so fall back to the reading from 1.5 s ago.
+        List<IconPos>? cur = null;
+        try
+        {
+            if (DisplayInfo.CurrentKey() == lastKey) cur = DesktopIcons.Read();
+        }
+        catch { cur = null; }
+        try
+        {
+            if (cur is { Count: > 0 }) { Save(cur); Emit(reasonKey, cur.Count); return; }
+            if (lastStable != null && lastStableKey == lastKey) { Save(lastStable); Emit(reasonKey, lastStable.Count); }
+        }
+        catch { }
     }
 
     void Save(List<IconPos> cur)
@@ -281,9 +358,11 @@ public sealed class Guardian : IDisposable
 
     public void Dispose()
     {
+        SystemEvents.DisplaySettingsChanging -= OnSystemDisplayChanged;
         SystemEvents.DisplaySettingsChanged -= OnSystemDisplayChanged;
         SystemEvents.PowerModeChanged -= OnPower;
         tick.Dispose();
         restoreTimer.Dispose();
+        autoSaveTimer.Dispose();
     }
 }
