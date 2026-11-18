@@ -25,12 +25,14 @@ jobs:
         id: ver
         shell: pwsh
         run: |
-          [xml]$p = Get-Content src/DesktopDuzenSabitleyici.csproj
-          $v = ($p.Project.PropertyGroup | Where-Object { $_.Version } | Select-Object -First 1).Version
+          $v = ([regex]::Match((Get-Content src/DesktopDuzenSabitleyici.csproj -Raw), '<Version>([^<]+)</Version>')).Groups[1].Value
           "version=$v" >> $env:GITHUB_OUTPUT
           $exists = $false
-          try { gh release view "v$v" --repo "${{ github.repository }}" *> $null; if ($LASTEXITCODE -eq 0) { $exists = $true } } catch {}
+          gh release view "v$v" --repo "${{ github.repository }}" 2>&1 | Out-Null
+          if ($LASTEXITCODE -eq 0) { $exists = $true }
           "exists=$exists" >> $env:GITHUB_OUTPUT
+          Write-Host "version=$v exists=$exists"
+          exit 0
         env:
           GH_TOKEN: ${{ github.token }}
 
