@@ -1,0 +1,57 @@
+name: build-and-release
+
+# Every push to main builds the app. If the <Version> in the .csproj has no release yet,
+# a new GitHub Release (vX.Y.Z) is published automatically with the exe attached —
+# the app's built-in updater picks it up from there.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Read version
+        id: ver
+        shell: pwsh
+        run: |
+          [xml]$p = Get-Content src/DesktopDuzenSabitleyici.csproj
+          $v = ($p.Project.PropertyGroup | Where-Object { $_.Version } | Select-Object -First 1).Version
+          "version=$v" >> $env:GITHUB_OUTPUT
+          $exists = $false
+          try { gh release view "v$v" --repo "${{ github.repository }}" *> $null; if ($LASTEXITCODE -eq 0) { $exists = $true } } catch {}
+          "exists=$exists" >> $env:GITHUB_OUTPUT
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+      - name: Publish single-file exe
+        shell: pwsh
+        run: >
+          dotnet publish src/DesktopDuzenSabitleyici.csproj -c Release -r win-x64 --self-contained true
+          -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true
+          -p:EnableCompressionInSingleFile=true -p:DebugType=none -o out
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: DesktopDuzenSabitleyici-v${{ steps.ver.outputs.version }}
+          path: out/DesktopDuzenSabitleyici.exe
+
+      - name: Publish release
+        if: steps.ver.outputs.exists != 'True'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.ver.outputs.version }}
+          name: Desktop Düzen Sabitleyici v${{ steps.ver.outputs.version }}
+          files: out/DesktopDuzenSabitleyici.exe
+          generate_release_notes: true
+          make_latest: true
