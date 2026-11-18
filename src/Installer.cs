@@ -67,6 +67,13 @@ public static class Installer
             using var k = Registry.CurrentUser.CreateSubKey(RunKey);
             if (on) k.SetValue(RunName, $"\"{Environment.ProcessPath}\" --tray");
             else k.DeleteValue(RunName, false);
+            if (on)
+            {
+                // If it was switched off in Task Manager > Startup apps, switch it back on.
+                using var ap = Registry.CurrentUser.CreateSubKey(@"Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run");
+                if (ap.GetValue(RunName) is byte[] b && b.Length > 0 && b[0] != 2)
+                    ap.SetValue(RunName, new byte[] { 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 }, RegistryValueKind.Binary);
+            }
         }
         catch { }
     }

@@ -12,6 +12,7 @@ static class Program
         using var mutex = new Mutex(true, "DesktopDuzenSabitleyici_Single_v1", out bool first);
         if (!first)
         {
+            if (args.Contains("--tray")) return; // already running: stay quiet at startup
             try { EventWaitHandle.OpenExisting(ShowEventName).Set(); } catch { }
             return;
         }
