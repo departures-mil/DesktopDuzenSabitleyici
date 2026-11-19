@@ -27,13 +27,12 @@ public sealed class MainForm : Form
     Label hStatus = null!, lStatus = null!, lHow = null!, lScreensH = null!, lScreens = null!, lIcons = null!, lSave = null!, lRestore = null!;
     Button bProtect = null!, bSaveNow = null!, bRestore = null!;
     Label hSettings = null!, lMode = null!, lLang = null!;
-    RadioButton rProp = null!, rProf = null!;
     CheckBox cAuto = null!, cStartup = null!, cAutoSave = null!;
-    Label lSaveInfo = null!;
+    Label lSaveInfo = null!, lModeInfo = null!;
     ComboBox cLang = null!;
     Label hProfiles = null!, hLog = null!;
     ListView lv = null!;
-    Button bDel = null!;
+    Button bDel = null!, bRestoreSel = null!;
     ListBox lb = null!;
     ContextMenuStrip trayMenu = null!;
     ToolStripMenuItem miOpen = null!, miSave = null!, miRestore = null!, miExit = null!;
@@ -158,11 +157,11 @@ public sealed class MainForm : Form
         if (m.Msg == WM_QUERYENDSESSION && !shutdownSaved)
         {
             shutdownSaved = true;
-            guard.SaveBeforeShutdown("log_shutdown");
+            guard.SaveBeforeShutdown("shutdown", "log_shutdown");
         }
         if (m.Msg == WM_HOTKEY && (int)m.WParam == 1)
         {
-            guard.SaveNow();
+            guard.SaveNow("hotkey");
             OnLog("log_hotkey", Array.Empty<object>());
             tray.ShowBalloonTip(1500, Lang.T("app_title"), Lang.T("log_hotkey"), ToolTipIcon.Info);
         }
@@ -217,7 +216,7 @@ public sealed class MainForm : Form
         if (e.CloseReason == CloseReason.WindowsShutDown && !shutdownSaved)
         {
             shutdownSaved = true;
-            guard.SaveBeforeShutdown("log_shutdown");
+            guard.SaveBeforeShutdown("shutdown", "log_shutdown");
         }
         try { Win32.UnregisterHotKey(Handle, 1); } catch { }
         tray.Visible = false;
@@ -227,7 +226,7 @@ public sealed class MainForm : Form
 
     void ExitApp()
     {
-        if (settings.Protect && !shutdownSaved) { shutdownSaved = true; guard.SaveBeforeShutdown("log_saved"); }
+        if (settings.Protect && !shutdownSaved) { shutdownSaved = true; guard.SaveBeforeShutdown("shutdown", "log_saved"); }
         reallyExit = true;
         Close();
     }
@@ -337,7 +336,7 @@ public sealed class MainForm : Form
         bSaveNow = Theme.ActionButton("", Theme.Accent);
         bRestore = Theme.ActionButton("", Theme.Green);
         bProtect.Click += (_, _) => ToggleProtect();
-        bSaveNow.Click += (_, _) => guard.SaveNow();
+        bSaveNow.Click += (_, _) => guard.SaveNow("manual");
         bRestore.Click += (_, _) => guard.RestoreNow();
         actions.Controls.AddRange(new Control[] { bSaveNow, bRestore, bProtect });
         fs.Controls.AddRange(new Control[] { hStatus, lStatus, lHow, lScreensH, lScreens, lIcons, lSave, lRestore, actions });
@@ -347,8 +346,8 @@ public sealed class MainForm : Form
         var fset = Flow();
         hSettings = L(hFont);
         lMode = L(new Font("Segoe UI Semibold", 10f), Theme.Sub);
-        rProp = new RadioButton { AutoSize = true, ForeColor = Theme.Text, Margin = new Padding(0, 4, 0, 2) };
-        rProf = new RadioButton { AutoSize = true, ForeColor = Theme.Text, Margin = new Padding(0, 2, 0, 10) };
+        lModeInfo = L(new Font("Segoe UI", 9.5f), Theme.Text);
+        lModeInfo.Margin = new Padding(0, 4, 0, 10);
         cAuto = new CheckBox { AutoSize = true, ForeColor = Theme.Text, Margin = new Padding(0, 4, 0, 4) };
         cStartup = new CheckBox { AutoSize = true, ForeColor = Theme.Text, Margin = new Padding(0, 4, 0, 4) };
         cAutoSave = new CheckBox { AutoSize = true, ForeColor = Theme.Text, Margin = new Padding(0, 4, 0, 4) };
@@ -361,15 +360,11 @@ public sealed class MainForm : Form
             BackColor = Theme.Card2, ForeColor = Theme.Text,
         };
         foreach (var (_, name) in Lang.Languages) cLang.Items.Add(name);
-        rProp.Checked = settings.Mode == 0;
-        rProf.Checked = settings.Mode == 1;
         cAuto.Checked = settings.DisableAutoArrange;
         cStartup.Checked = settings.StartWithWindows;
         cAutoSave.Checked = settings.AutoSave;
         cAutoSave.CheckedChanged += (_, _) => { if (!loading) { settings.AutoSave = cAutoSave.Checked; Storage.SaveSettings(settings); } };
         cLang.SelectedIndex = Math.Max(0, Array.FindIndex(Lang.Languages, x => x.code == settings.Lang));
-        rProp.CheckedChanged += (_, _) => { if (!loading && rProp.Checked) { settings.Mode = 0; Storage.SaveSettings(settings); } };
-        rProf.CheckedChanged += (_, _) => { if (!loading && rProf.Checked) { settings.Mode = 1; Storage.SaveSettings(settings); } };
         cAuto.CheckedChanged += (_, _) => { if (!loading) { settings.DisableAutoArrange = cAuto.Checked; Storage.SaveSettings(settings); } };
         cStartup.CheckedChanged += (_, _) =>
         {
@@ -385,7 +380,7 @@ public sealed class MainForm : Form
             Storage.SaveSettings(settings);
             ApplyLanguage();
         };
-        fset.Controls.AddRange(new Control[] { hSettings, lMode, rProp, rProf, cAuto, cAutoSave, cStartup, lSaveInfo, lLang, cLang });
+        fset.Controls.AddRange(new Control[] { hSettings, lMode, lModeInfo, cAuto, cAutoSave, cStartup, lSaveInfo, lLang, cLang });
 
         // profiles card
         var tp = new TableLayoutPanel { ColumnCount = 1, RowCount = 3, BackColor = Theme.Card };
@@ -400,8 +395,11 @@ public sealed class MainForm : Form
             OwnerDraw = true, Margin = new Padding(0, D(6), 0, D(6)),
         };
         lv.Columns.Add("", 300);
-        lv.Columns.Add("", 70);
+        lv.Columns.Add("", 60);
         lv.Columns.Add("", 140);
+        lv.Columns.Add("", 120);
+        lv.MultiSelect = false;
+        lv.DoubleClick += (_, _) => RestoreSelected();
         lv.DrawColumnHeader += (_, e) =>
         {
             using var bg = new SolidBrush(Theme.Card);
@@ -414,10 +412,14 @@ public sealed class MainForm : Form
         lv.DrawSubItem += (_, e) => e.DrawDefault = true;
         lv.Resize += (_, _) => FitColumns();
         bDel = Theme.ActionButton("", Theme.Red);
-        bDel.Click += (_, _) => DeleteProfile();
+        bDel.Click += (_, _) => DeleteSelected();
+        bRestoreSel = Theme.ActionButton("", Theme.Green);
+        bRestoreSel.Click += (_, _) => RestoreSelected();
+        var hb = new FlowLayoutPanel { AutoSize = true, WrapContents = true, BackColor = Theme.Card, Margin = Padding.Empty };
+        hb.Controls.AddRange(new Control[] { bRestoreSel, bDel });
         tp.Controls.Add(hProfiles, 0, 0);
         tp.Controls.Add(lv, 0, 1);
-        tp.Controls.Add(bDel, 0, 2);
+        tp.Controls.Add(hb, 0, 2);
 
         // log card
         var tl = new TableLayoutPanel { ColumnCount = 1, RowCount = 2, BackColor = Theme.Card };
@@ -443,7 +445,7 @@ public sealed class MainForm : Form
         // tray menu
         trayMenu = new ContextMenuStrip();
         miOpen = new ToolStripMenuItem("", null, (_, _) => ShowMain());
-        miSave = new ToolStripMenuItem("", null, (_, _) => guard.SaveNow());
+        miSave = new ToolStripMenuItem("", null, (_, _) => guard.SaveNow("manual"));
         miRestore = new ToolStripMenuItem("", null, (_, _) => guard.RestoreNow());
         miExit = new ToolStripMenuItem("", null, (_, _) => ExitApp());
         trayMenu.Items.AddRange(new ToolStripItem[] { miOpen, new ToolStripSeparator(), miSave, miRestore, new ToolStripSeparator(), miExit });
@@ -451,11 +453,12 @@ public sealed class MainForm : Form
 
     void FitColumns()
     {
-        if (lv.Columns.Count < 3) return;
+        if (lv.Columns.Count < 4) return;
         int w = lv.ClientSize.Width;
-        lv.Columns[1].Width = D(70);
-        lv.Columns[2].Width = D(150);
-        lv.Columns[0].Width = Math.Max(D(120), w - D(70) - D(150) - 4);
+        lv.Columns[1].Width = D(60);
+        lv.Columns[2].Width = D(130);
+        lv.Columns[3].Width = D(120);
+        lv.Columns[0].Width = Math.Max(D(120), w - D(60) - D(130) - D(120) - 4);
     }
 
     // ---------------- texts ----------------
@@ -476,8 +479,7 @@ public sealed class MainForm : Form
         bRestore.Text = Lang.T("restore_now");
         hSettings.Text = Lang.T("settings_hdr");
         lMode.Text = Lang.T("mode");
-        rProp.Text = Lang.T("mode_prop");
-        rProf.Text = Lang.T("mode_prof");
+        lModeInfo.Text = Lang.T("mode_info");
         cAuto.Text = Lang.T("autoarr");
         cStartup.Text = Lang.T("startup");
         cAutoSave.Text = Lang.T("autosave");
@@ -487,6 +489,8 @@ public sealed class MainForm : Form
         lv.Columns[0].Text = Lang.T("col_display");
         lv.Columns[1].Text = Lang.T("col_icons");
         lv.Columns[2].Text = Lang.T("col_date");
+        lv.Columns[3].Text = Lang.T("col_src");
+        bRestoreSel.Text = Lang.T("restore_sel");
         lv.RightToLeftLayout = rtl;
         bDel.Text = Lang.T("delete");
         hLog.Text = Lang.T("log_hdr");
@@ -533,28 +537,48 @@ public sealed class MainForm : Form
 
     void RefreshProfiles()
     {
+        string? sel = lv.SelectedItems.Count > 0 ? lv.SelectedItems[0].Tag as string : null;
         lv.BeginUpdate();
         lv.Items.Clear();
-        foreach (var kv in store.Profiles.OrderByDescending(p => p.Value.SavedUtc))
+        var profiles = store.Displays.Values
+            .OrderByDescending(p => p.Key == guard.CurrentKey)
+            .ThenByDescending(p => p.Latest?.SavedUtc ?? DateTime.MinValue);
+        foreach (var p in profiles)
         {
-            bool cur = kv.Key == guard.CurrentKey;
-            var it = new ListViewItem((kv.Value.Display.Length > 0 ? kv.Value.Display : kv.Key) + (cur ? $"   ◀ {Lang.T("current")}" : ""))
+            bool cur = p.Key == guard.CurrentKey;
+            string name = p.Display.Length > 0 ? p.Display : p.Key;
+            for (int i = 0; i < p.History.Count; i++)
             {
-                Tag = kv.Key,
-                ForeColor = cur ? Theme.Green : Theme.Text,
-            };
-            it.SubItems.Add(kv.Value.Icons.Count.ToString());
-            it.SubItems.Add(kv.Value.SavedUtc.ToLocalTime().ToString("dd.MM.yyyy HH:mm"));
-            lv.Items.Add(it);
+                var h = p.History[i];
+                bool top = i == 0;
+                var it = new ListViewItem(name + (cur && top ? $"   ◀ {Lang.T("current")}" : ""))
+                {
+                    Tag = h.Id,
+                    ForeColor = cur && top ? Theme.Green : top ? Theme.Text : Theme.Sub,
+                };
+                it.SubItems.Add(h.Icons.Count.ToString());
+                it.SubItems.Add(h.SavedUtc.ToLocalTime().ToString("dd.MM.yyyy HH:mm"));
+                it.SubItems.Add(Lang.T("src_" + h.Source));
+                if (h.Id == sel) it.Selected = true;
+                lv.Items.Add(it);
+            }
         }
         lv.EndUpdate();
         FitColumns();
     }
 
-    void DeleteProfile()
+    string? SelectedSnap() => lv.SelectedItems.Count > 0 ? lv.SelectedItems[0].Tag as string : null;
+
+    void RestoreSelected()
     {
-        if (lv.SelectedItems.Count == 0 || lv.SelectedItems[0].Tag is not string key) return;
-        store.Profiles.Remove(key);
+        if (SelectedSnap() is string id) guard.RestoreSnapshot(id);
+    }
+
+    void DeleteSelected()
+    {
+        if (SelectedSnap() is not string id || store.Find(id) is not { } f) return;
+        f.p.History.Remove(f.s);
+        if (f.p.History.Count == 0) store.Displays.Remove(f.p.Key);
         Storage.SaveStore(store);
         RefreshProfiles();
     }
@@ -630,7 +654,7 @@ public sealed class MainForm : Form
             GitHubSync.SetToken(settings, tf.Token);
             Storage.SaveSettings(settings);
         }
-        guard.SaveNow();
+        if (guard.Trusted) guard.SaveNow("manual");
         var err = await DoSync();
         if (err == null) MessageBox.Show(this, Lang.T("sync_ok"), Lang.T("sync_title"), MessageBoxButtons.OK, MessageBoxIcon.Information, MessageBoxDefaultButton.Button1, Lang.IsRtl ? MessageBoxOptions.RtlReading | MessageBoxOptions.RightAlign : 0);
         else MessageBox.Show(this, Lang.F("sync_fail", err), Lang.T("sync_title"), MessageBoxButtons.OK, MessageBoxIcon.Warning, MessageBoxDefaultButton.Button1, Lang.IsRtl ? MessageBoxOptions.RtlReading | MessageBoxOptions.RightAlign : 0);
@@ -638,8 +662,8 @@ public sealed class MainForm : Form
 
     async Task AutoSync()
     {
-        if (syncing || GitHubSync.GetToken(settings) == null || store.Master == null) return;
-        if (lastSyncedSave == store.Master.SavedUtc) return;
+        if (syncing || GitHubSync.GetToken(settings) == null || store.Displays.Count == 0) return;
+        if (lastSyncedSave == store.LatestUtc) return;
         await DoSync();
     }
 
@@ -649,14 +673,12 @@ public sealed class MainForm : Form
         bSync.Enabled = false;
         try
         {
-            var (merged, remoteWon) = await GitHubSync.SyncAsync(settings, store);
-            store.Master = merged.Master;
-            store.Profiles = merged.Profiles;
+            var merged = await GitHubSync.SyncAsync(settings, store);
+            store.Displays = merged.Displays;
             Storage.SaveStore(store);
             Storage.SaveSettings(settings);
-            lastSyncedSave = store.Master?.SavedUtc;
+            lastSyncedSave = store.LatestUtc;
             OnLog("log_synced", Array.Empty<object>());
-            if (remoteWon && settings.Protect) guard.ReloadAfterSync();
             RefreshInfo();
             return null;
         }
