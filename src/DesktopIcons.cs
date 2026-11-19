@@ -15,7 +15,7 @@ public static class DesktopIcons
     static readonly Guid IID_IShellFolder = new("000214E6-0000-0000-C000-000000000046");
 
     const int CSIDL_DESKTOP = 0, SWC_DESKTOP = 8, SWFO_NEEDDISPATCH = 1;
-    const uint SVGIO_ALLVIEW = 2, SVSI_POSITIONITEM = 0x80, SHGDN_FORPARSING = 0x8000, FWF_AUTOARRANGE = 0x1;
+    const uint SVGIO_ALLVIEW = 2, SVSI_POSITIONITEM = 0x80, SHGDN_FORPARSING = 0x8000, FWF_AUTOARRANGE = 0x1, FWF_SNAPTOGRID = 0x80000;
 
     /// <summary>Window handle of the desktop view seen on the last call (changes when Explorer restarts).</summary>
     public static IntPtr LastViewHwnd { get; private set; }
@@ -144,9 +144,19 @@ public static class DesktopIcons
                 pidls.Add(pidl);
                 pts.Add(new POINT(t.X - c.Origin.X, t.Y - c.Origin.Y));
             }
-            // Position one by one so that every icon reaches its own cell (more reliable with "align to grid").
-            for (int i = 0; i < pidls.Count; i++)
-                c.View.SelectAndPositionItems(1, new[] { pidls[i] }, new[] { pts[i] }, SVSI_POSITIONITEM);
+            // With "align to grid" on, an icon sent to a cell that another (not yet moved) icon still occupies
+            // gets pushed to a neighbouring cell. Switch the grid off while moving, then back on.
+            bool snap = c.View.GetCurrentFolderFlags(out uint flags) == 0 && (flags & FWF_SNAPTOGRID) != 0;
+            if (snap) c.View.SetCurrentFolderFlags(FWF_SNAPTOGRID, 0);
+            try
+            {
+                for (int i = 0; i < pidls.Count; i++)
+                    try { c.View.SelectAndPositionItems(1, new[] { pidls[i] }, new[] { pts[i] }, SVSI_POSITIONITEM); } catch { }
+            }
+            finally
+            {
+                if (snap) c.View.SetCurrentFolderFlags(FWF_SNAPTOGRID, FWF_SNAPTOGRID);
+            }
             return pidls.Count;
         }
         finally

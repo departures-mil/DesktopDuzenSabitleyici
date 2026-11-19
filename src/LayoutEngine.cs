@@ -2,53 +2,193 @@ namespace DDS;
 
 public static class LayoutEngine
 {
-    public static Layout Capture(List<IconPos> icons, List<MonitorInfo> mons, string key, string display)
+    public static Profile Shape(List<MonitorInfo> mons, string key, string display) =>
+        new() { Key = key, Display = display, Monitors = mons.Select(MonitorRec.From).ToList() };
+
+    public static Snapshot Capture(List<IconPos> icons, List<MonitorInfo> mons, Size spacing, string source)
     {
-        var l = new Layout { ConfigKey = key, Display = display, SavedUtc = DateTime.UtcNow };
+        var s = new Snapshot { SavedUtc = DateTime.UtcNow, Source = source, SpacingW = spacing.Width, SpacingH = spacing.Height };
         foreach (var i in icons)
         {
             var m = DisplayInfo.For(mons, i.X, i.Y);
             var w = m.Work;
-            l.Icons.Add(new IconEntry
+            s.Icons.Add(new IconEntry
             {
                 Key = i.Key, X = i.X, Y = i.Y, Mon = m.Model, Primary = m.Primary,
                 RX = w.Width > 0 ? Math.Clamp((i.X - w.Left) / (double)w.Width, 0, 1) : 0,
                 RY = w.Height > 0 ? Math.Clamp((i.Y - w.Top) / (double)w.Height, 0, 1) : 0,
             });
         }
-        return l;
+        return s;
     }
 
-    public static List<IconPos> Absolute(Layout l) => l.Icons.Select(e => new IconPos(e.Key, e.X, e.Y)).ToList();
+    public static bool SameIcons(Snapshot a, Snapshot b)
+    {
+        if (a.Icons.Count != b.Icons.Count) return false;
+        var d = new Dictionary<string, IconEntry>(StringComparer.OrdinalIgnoreCase);
+        foreach (var e in a.Icons) d[e.Key] = e;
+        foreach (var e in b.Icons)
+            if (!d.TryGetValue(e.Key, out var o) || Math.Abs(o.X - e.X) > 3 || Math.Abs(o.Y - e.Y) > 3) return false;
+        return true;
+    }
+
+    /// <summary>Two display setups that differ only in where the monitors sit relative to each other.</summary>
+    public static bool SameScreens(Profile p, List<MonitorInfo> mons)
+    {
+        if (p.Monitors.Count != mons.Count) return false;
+        var a = p.Monitors.Select(m => $"{m.Model}:{m.W}x{m.H}~{m.Dpi}{(m.Primary ? "P" : "")}").OrderBy(x => x);
+        var b = mons.Select(m => $"{m.Model}:{m.Bounds.Width}x{m.Bounds.Height}~{m.Dpi}{(m.Primary ? "P" : "")}").OrderBy(x => x);
+        return a.SequenceEqual(b);
+    }
 
     /// <summary>
-    /// Re-creates a layout on a different screen setup: each icon keeps its relative place
-    /// (top-left stays top-left, middle stays middle) and snaps to the nearest free grid cell.
+    /// Builds target positions for the current screens from a saved snapshot.
+    /// Same monitor (same size and scale): exact pixel positions, only shifted if the monitor moved.
+    /// Different monitor: every icon keeps its distance in grid cells from the nearest edges
+    /// (an icon 2 columns from the right edge stays 2 columns from the right edge), so groups stay
+    /// together instead of being stretched across a bigger screen.
     /// </summary>
-    public static List<IconPos> Proportional(Layout l, List<MonitorInfo> mons, Size spacing)
+    public static List<IconPos> Build(Profile src, Snapshot snap, List<MonitorInfo> mons, Size targetSpacing, out bool exact)
     {
+        exact = true;
         var result = new List<IconPos>();
         if (mons.Count == 0) return result;
         var primary = mons.FirstOrDefault(m => m.Primary) ?? mons[0];
+        var srcMons = src.Monitors.Count > 0 ? src.Monitors : StoreData.MonitorsFromKey(src.Key);
+        var srcSpacing = SpacingOf(snap, srcMons);
+        int tw = Math.Max(20, targetSpacing.Width), th = Math.Max(20, targetSpacing.Height);
         var used = new Dictionary<string, HashSet<(int, int)>>();
+        var pending = new List<(IconEntry e, MonitorRec? sm, MonitorInfo tm)>();
 
-        foreach (var e in l.Icons)
+        foreach (var e in snap.Icons)
         {
-            MonitorInfo t = e.Primary
-                ? primary
-                : mons.FirstOrDefault(m => !m.Primary && m.Model == e.Mon) ?? primary;
-            var w = t.Work;
-            int cw = Math.Max(20, spacing.Width), ch = Math.Max(20, spacing.Height);
-            int cols = Math.Max(1, w.Width / cw), rows = Math.Max(1, w.Height / ch);
-            int col = Math.Clamp((int)Math.Floor(e.RX * cols + 0.5), 0, cols - 1);
-            int row = Math.Clamp((int)Math.Floor(e.RY * rows + 0.5), 0, rows - 1);
+            var sm = SourceMonitor(srcMons, e);
+            var tm = TargetMonitor(mons, primary, e, sm);
+            if (sm != null && sm.W == tm.Bounds.Width && sm.H == tm.Bounds.Height && sm.Dpi == tm.Dpi)
+            {
+                int x = e.X - sm.X + tm.Bounds.X, y = e.Y - sm.Y + tm.Bounds.Y;
+                result.Add(new IconPos(e.Key, x, y));
+                Mark(used, tm, (x - tm.Work.Left + tw / 2) / tw, (y - tm.Work.Top + th / 2) / th);
+            }
+            else pending.Add((e, sm, tm));
+        }
 
-            if (!used.TryGetValue(t.Device, out var set)) used[t.Device] = set = new HashSet<(int, int)>();
+        if (pending.Count > 0) exact = false;
+
+        // Grid cell of every pending icon on its source monitor.
+        var cells = new List<(IconEntry e, MonitorRec? sm, MonitorInfo tm, int sc, int sr, int sCols, int sRows)>();
+        foreach (var (e, sm, tm) in pending)
+        {
+            if (sm == null) { cells.Add((e, null, tm, -1, -1, 0, 0)); continue; }
+            var sWork = sm.Work;
+            int sw = Math.Max(20, srcSpacing.Width), sh = Math.Max(20, srcSpacing.Height);
+            int sCols = Math.Max(1, sWork.Width / sw), sRows = Math.Max(1, sWork.Height / sh);
+            int sc = Math.Clamp((int)Math.Round((e.X - sWork.Left) / (double)sw), 0, sCols - 1);
+            int sr = Math.Clamp((int)Math.Round((e.Y - sWork.Top) / (double)sh), 0, sRows - 1);
+            cells.Add((e, sm, tm, sc, sr, sCols, sRows));
+        }
+
+        // Icons that touch each other form a block; a whole block sticks to its nearest edge,
+        // so a column of icons is never torn apart and a group at the right edge stays at the right edge.
+        var leftAnchor = new Dictionary<IconEntry, bool>();
+        var topAnchor = new Dictionary<IconEntry, bool>();
+        foreach (var g in cells.Where(c => c.sm != null).GroupBy(c => (c.sm, c.sr)))
+            foreach (var run in Runs(g.OrderBy(c => c.sc).ToList(), c => c.sc))
+            {
+                bool left = run[0].sc <= run[0].sCols - 1 - run[^1].sc;
+                foreach (var c in run) leftAnchor[c.e] = left;
+            }
+        foreach (var g in cells.Where(c => c.sm != null).GroupBy(c => (c.sm, c.sc)))
+            foreach (var run in Runs(g.OrderBy(c => c.sr).ToList(), c => c.sr))
+            {
+                bool top = run[0].sr <= run[0].sRows - 1 - run[^1].sr;
+                foreach (var c in run) topAnchor[c.e] = top;
+            }
+
+        // Place icons nearest to a corner first so the outer grid keeps its shape.
+        foreach (var c in cells.OrderBy(c => Score(c.e)))
+        {
+            var tWork = c.tm.Work;
+            int cols = Math.Max(1, tWork.Width / tw), rows = Math.Max(1, tWork.Height / th);
+            int col, row;
+            if (c.sm != null)
+            {
+                col = leftAnchor[c.e] ? c.sc : cols - 1 - (c.sCols - 1 - c.sc);
+                row = topAnchor[c.e] ? c.sr : rows - 1 - (c.sRows - 1 - c.sr);
+            }
+            else
+            {
+                col = (int)Math.Round(c.e.RX * (cols - 1));
+                row = (int)Math.Round(c.e.RY * (rows - 1));
+            }
+            col = Math.Clamp(col, 0, cols - 1);
+            row = Math.Clamp(row, 0, rows - 1);
+            if (!used.TryGetValue(c.tm.Device, out var set)) used[c.tm.Device] = set = new HashSet<(int, int)>();
             (col, row) = NearestFree(set, col, row, cols, rows);
             set.Add((col, row));
-            result.Add(new IconPos(e.Key, w.Left + col * cw, w.Top + row * ch));
+            result.Add(new IconPos(c.e.Key, tWork.Left + col * tw, tWork.Top + row * th));
         }
         return result;
+    }
+
+    static List<List<T>> Runs<T>(List<T> sorted, Func<T, int> pos)
+    {
+        var runs = new List<List<T>>();
+        foreach (var x in sorted)
+        {
+            if (runs.Count > 0 && pos(x) - pos(runs[^1][^1]) <= 1) runs[^1].Add(x);
+            else runs.Add(new List<T> { x });
+        }
+        return runs;
+    }
+
+    static double Score(IconEntry e)
+    {
+        double rx = e.RX, ry = e.RY;
+        return Math.Min(rx, 1 - rx) + Math.Min(ry, 1 - ry);
+    }
+
+    static void Mark(Dictionary<string, HashSet<(int, int)>> used, MonitorInfo m, int c, int r)
+    {
+        if (!used.TryGetValue(m.Device, out var set)) used[m.Device] = set = new HashSet<(int, int)>();
+        set.Add((c, r));
+    }
+
+    static MonitorRec? SourceMonitor(List<MonitorRec> srcMons, IconEntry e)
+    {
+        foreach (var m in srcMons) if (m.Bounds.Contains(e.X, e.Y)) return m;
+        return srcMons.FirstOrDefault(m => m.Model == e.Mon && m.Primary == e.Primary)
+               ?? srcMons.FirstOrDefault(m => m.Model == e.Mon)
+               ?? srcMons.FirstOrDefault(m => m.Primary == e.Primary);
+    }
+
+    static MonitorInfo TargetMonitor(List<MonitorInfo> mons, MonitorInfo primary, IconEntry e, MonitorRec? sm)
+    {
+        string model = sm?.Model ?? e.Mon;
+        bool prim = sm?.Primary ?? e.Primary;
+        return mons.FirstOrDefault(m => m.Model == model)
+               ?? (prim ? primary : mons.FirstOrDefault(m => !m.Primary) ?? primary);
+    }
+
+    /// <summary>Grid spacing of a snapshot: stored value, otherwise measured from the icon positions.</summary>
+    static Size SpacingOf(Snapshot s, List<MonitorRec> mons)
+    {
+        if (s.SpacingW > 10 && s.SpacingH > 10) return new Size(s.SpacingW, s.SpacingH);
+        int dpi = mons.FirstOrDefault(m => m.Primary)?.Dpi ?? 96;
+        int gx = MinGap(s.Icons.Select(i => i.X)), gy = MinGap(s.Icons.Select(i => i.Y));
+        return new Size(gx > 0 ? gx : (int)Math.Round(76 * dpi / 96.0), gy > 0 ? gy : (int)Math.Round(98 * dpi / 96.0));
+    }
+
+    static int MinGap(IEnumerable<int> values)
+    {
+        var v = values.Distinct().OrderBy(x => x).ToList();
+        int best = 0;
+        for (int i = 1; i < v.Count; i++)
+        {
+            int g = v[i] - v[i - 1];
+            if (g >= 30 && g <= 400 && (best == 0 || g < best)) best = g;
+        }
+        return best;
     }
 
     static (int, int) NearestFree(HashSet<(int, int)> used, int c, int r, int cols, int rows)
@@ -65,7 +205,7 @@ public static class LayoutEngine
                 if (Math.Max(Math.Abs(dc), Math.Abs(dr)) != rad) continue;
                 int nc = c + dc, nr = r + dr;
                 if (nc < 0 || nr < 0 || nc >= cols || nr >= rows || used.Contains((nc, nr))) continue;
-                int d = dc * dc + dr * dr;
+                int d = dc * dc * 2 + dr * dr; // prefer staying in the same column
                 if (d < bestD) { bestD = d; best = (nc, nr); }
             }
             if (best != null) return best.Value;
@@ -83,5 +223,21 @@ public static class LayoutEngine
             if (cur.TryGetValue(t.Key, out var c) && (Math.Abs(c.X - t.X) > tolX || Math.Abs(c.Y - t.Y) > tolY))
                 bad++;
         return bad;
+    }
+
+    /// <summary>
+    /// True when the change from <paramref name="a"/> to <paramref name="b"/> looks like Windows reshuffling
+    /// the desktop (many icons moved by different amounts) rather than the user dragging a selection.
+    /// </summary>
+    public static bool LooksLikeReshuffle(Dictionary<string, Point> a, Dictionary<string, Point> b)
+    {
+        var deltas = new List<Point>();
+        foreach (var kv in b)
+            if (a.TryGetValue(kv.Key, out var p) && (Math.Abs(p.X - kv.Value.X) > 3 || Math.Abs(p.Y - kv.Value.Y) > 3))
+                deltas.Add(new Point(kv.Value.X - p.X, kv.Value.Y - p.Y));
+        if (deltas.Count < 3) return false;
+        var d0 = deltas[0];
+        int different = deltas.Count(d => Math.Abs(d.X - d0.X) > 3 || Math.Abs(d.Y - d0.Y) > 3);
+        return different >= 2;
     }
 }

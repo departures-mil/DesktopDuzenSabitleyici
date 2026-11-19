@@ -41,8 +41,8 @@ public static class GitHubSync
         return h;
     }
 
-    /// <summary>Merges local and remote data (newest wins) and uploads the result. Returns the merged store and whether the master layout came from GitHub.</summary>
-    public static async Task<(StoreData merged, bool remoteWon)> SyncAsync(Settings s, StoreData local)
+    /// <summary>Merges local and remote histories (nothing is lost, newest first) and uploads the result.</summary>
+    public static async Task<StoreData> SyncAsync(Settings s, StoreData local)
     {
         var token = GetToken(s) ?? throw new InvalidOperationException("token");
         using var http = Client(token);
@@ -77,7 +77,7 @@ public static class GitHubSync
             else gistId = null;
         }
 
-        var merged = Merge(local, remote, out bool remoteWon);
+        var merged = Merge(local, remote);
         var payload = new JsonObject
         {
             ["description"] = Description,
@@ -96,7 +96,7 @@ public static class GitHubSync
         }
         await Ensure(up);
         s.GistId = (string?)JsonNode.Parse(await up.Content.ReadAsStringAsync())!["id"];
-        return (merged, remoteWon);
+        return merged;
     }
 
     static StringContent Json(JsonNode n) => new(n.ToJsonString(), Encoding.UTF8, "application/json");
@@ -111,20 +111,22 @@ public static class GitHubSync
         throw new HttpRequestException(msg.Trim());
     }
 
-    static StoreData Merge(StoreData local, StoreData? remote, out bool remoteWon)
+    static StoreData Merge(StoreData local, StoreData? remote)
     {
-        remoteWon = false;
         if (remote == null) return local;
         var m = new StoreData { LastKey = local.LastKey };
-        if (local.Master == null) { m.Master = remote.Master; remoteWon = remote.Master != null; }
-        else if (remote.Master != null && remote.Master.SavedUtc > local.Master.SavedUtc.AddSeconds(1))
-        { m.Master = remote.Master; remoteWon = true; }
-        else m.Master = local.Master;
-
-        foreach (var kv in local.Profiles) m.Profiles[kv.Key] = kv.Value;
-        foreach (var kv in remote.Profiles)
-            if (!m.Profiles.TryGetValue(kv.Key, out var l) || kv.Value.SavedUtc > l.SavedUtc)
-                m.Profiles[kv.Key] = kv.Value;
+        foreach (var src in new[] { local, remote })
+            foreach (var p in src.Displays.Values)
+            {
+                if (!m.Displays.TryGetValue(p.Key, out var t))
+                {
+                    t = new Profile { Key = p.Key, Display = p.Display, Monitors = p.Monitors };
+                    m.Displays[p.Key] = t;
+                }
+                foreach (var h in p.History)
+                    if (t.History.All(x => x.Id != h.Id)) t.History.Add(h);
+            }
+        foreach (var p in m.Displays.Values) StoreData.Trim(p);
         return m;
     }
 }
