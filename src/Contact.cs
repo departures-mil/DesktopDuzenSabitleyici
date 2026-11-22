@@ -70,18 +70,50 @@ public sealed class ContactForm : Form
                 ["Surum"] = Updater.CurrentText, ["Cihaz"] = "Windows " + Environment.OSVersion.Version, ["Dil"] = Lang.Current,
             };
             if (mail.Length > 0) { body["email"] = mail; body["_replyto"] = mail; }
+            // İki bağımsız kanal; biri kabul ederse mesaj ulaşmış sayılır:
+            //  1) yöneticinin mesaj kutusu (Firestore "mesajlar", yalnızca ekleme; etkinleştirme gerekmez)
+            //  2) e-posta kopyası (FormSubmit; "etkinleştirme gerekli" yanıtı ulaştı sayılmaz)
             using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(30) };
-            using var req = new HttpRequestMessage(HttpMethod.Post, "https://formsubmit.co/ajax/" + to)
+            static object F(string v) => new Dictionary<string, string> { ["stringValue"] = v.Length > 4000 ? v.Substring(0, 4000) : v };
+            var fields = new Dictionary<string, object>
             {
-                Content = new StringContent(JsonSerializer.Serialize(body), Encoding.UTF8, "application/json"),
+                ["mesaj"] = F(msg), ["konu"] = F("Desktop Düzen Sabitleyici · Mesaj"), ["dil"] = F(Lang.Current),
+                ["surum"] = F(Updater.CurrentText), ["platform"] = F("Desktop Düzen Sabitleyici · Windows " + Environment.OSVersion.Version),
+                ["zaman"] = new Dictionary<string, string> { ["timestampValue"] = DateTime.UtcNow.ToString("yyyy-MM-dd'T'HH:mm:ss'Z'", System.Globalization.CultureInfo.InvariantCulture) },
             };
-            req.Headers.Accept.ParseAdd("application/json");
-            req.Headers.Referrer = new Uri("https://departures-mil.github.io/DesktopDuzenSabitleyici/");
-            req.Headers.TryAddWithoutValidation("Origin", "https://departures-mil.github.io");
-            req.Headers.UserAgent.ParseAdd("Mozilla/5.0 (Windows NT 10.0; Win64; x64) DesktopDuzenSabitleyici/" + Updater.CurrentText);
-            using var res = await http.SendAsync(req);
-            var txt = await res.Content.ReadAsStringAsync();
-            if (!res.IsSuccessStatusCode && !txt.Contains("activat", StringComparison.OrdinalIgnoreCase)) throw new Exception(((int)res.StatusCode).ToString());
+            if (tName.Text.Trim().Length > 0) fields["ad"] = F(tName.Text.Trim());
+            if (mail.Length > 0) fields["iletisim"] = F(mail);
+            async Task<bool> Inbox()
+            {
+                try
+                {
+                    using var r = await http.PostAsync("https://firestore.googleapis.com/v1/projects/comm-calc-103111111/databases/(default)/documents/mesajlar?key=AIzaSyB12RFS6ENPpmnnPsETfjedNH-3hmNWQvA",
+                        new StringContent(JsonSerializer.Serialize(new Dictionary<string, object> { ["fields"] = fields }), Encoding.UTF8, "application/json"));
+                    return r.IsSuccessStatusCode;
+                }
+                catch { return false; }
+            }
+            async Task<bool> Email()
+            {
+                try
+                {
+                    using var req = new HttpRequestMessage(HttpMethod.Post, "https://formsubmit.co/ajax/" + to)
+                    {
+                        Content = new StringContent(JsonSerializer.Serialize(body), Encoding.UTF8, "application/json"),
+                    };
+                    req.Headers.Accept.ParseAdd("application/json");
+                    req.Headers.Referrer = new Uri("https://formsubmit.co/");
+                    req.Headers.TryAddWithoutValidation("Origin", "https://formsubmit.co");
+                    req.Headers.UserAgent.ParseAdd("Mozilla/5.0 (Windows NT 10.0; Win64; x64) DesktopDuzenSabitleyici/" + Updater.CurrentText);
+                    using var res = await http.SendAsync(req);
+                    var txt = await res.Content.ReadAsStringAsync();
+                    using var doc = JsonDocument.Parse(string.IsNullOrWhiteSpace(txt) ? "{}" : txt);
+                    return doc.RootElement.TryGetProperty("success", out var sv) && sv.ToString().Equals("true", StringComparison.OrdinalIgnoreCase);
+                }
+                catch { return false; }
+            }
+            var ok = await Task.WhenAll(Inbox(), Email());
+            if (!ok[0] && !ok[1]) throw new Exception("send");
             tMsg.Text = "";
             lStatus.Text = Lang.T("contact_ok");
         }

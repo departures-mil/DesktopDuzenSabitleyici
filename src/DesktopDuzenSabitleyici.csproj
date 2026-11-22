@@ -9,7 +9,7 @@
     <EnableWindowsTargeting>true</EnableWindowsTargeting>
     <AssemblyName>DesktopDuzenSabitleyici</AssemblyName>
     <RootNamespace>DDS</RootNamespace>
-    <Version>1.0.6</Version>
+    <Version>1.0.7</Version>
     <Product>Desktop Düzen Sabitleyici</Product>
     <Company>departures-mil</Company>
     <ApplicationIcon>app.ico</ApplicationIcon>
