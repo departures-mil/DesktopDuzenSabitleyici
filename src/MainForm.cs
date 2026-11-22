@@ -28,6 +28,8 @@ public sealed class MainForm : Form
     Button bProtect = null!, bSaveNow = null!, bRestore = null!;
     Label hSettings = null!, lMode = null!, lLang = null!;
     Button bContact = null!;
+    Button bBell = null!;
+    Announcements announcements = null!;
     CheckBox cAuto = null!, cStartup = null!, cAutoSave = null!;
     Label lSaveInfo = null!, lModeInfo = null!;
     ComboBox cLang = null!;
@@ -114,6 +116,7 @@ public sealed class MainForm : Form
             autoSyncTimer.Start();
             await Task.Delay(4000);
             await CheckUpdateSilently();
+            await announcements.StartAsync();
         });
     }
 
@@ -293,7 +296,11 @@ public sealed class MainForm : Form
         bMin = WinButton(Theme.GMin, () => WindowState = FormWindowState.Minimized);
         bSync = WinButton(Theme.GSync, async () => await SyncClicked());
         bUpdate = WinButton(Theme.GDownload, UpdateClicked);
-        btns.Controls.AddRange(new Control[] { bClose, bHalf, bMin, bSync, bUpdate });
+        bBell = WinButton("🔔", () => { });
+        bBell.Font = new Font("Segoe UI Emoji", 10f);
+        bBell.AutoSize = true;
+        btns.Controls.AddRange(new Control[] { bClose, bHalf, bMin, bSync, bUpdate, bBell });
+        announcements = new Announcements(this, bBell, UpdateClicked);
 
         logo = new PictureBox
         {
