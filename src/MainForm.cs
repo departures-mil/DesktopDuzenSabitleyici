@@ -32,6 +32,7 @@ public sealed class MainForm : Form
     Announcements announcements = null!;
     CheckBox cAuto = null!, cStartup = null!, cAutoSave = null!;
     Label lSaveInfo = null!, lModeInfo = null!;
+    Label lUsageH = null!, lUsage = null!;
     ComboBox cLang = null!;
     Label hProfiles = null!, hLog = null!;
     ListView lv = null!;
@@ -391,7 +392,14 @@ public sealed class MainForm : Form
         bContact = Theme.ActionButton("", Theme.Card2);
         bContact.Margin = new Padding(0, D(14), 0, 0);
         bContact.Click += (_, _) => { using var f = new ContactForm(); f.ShowDialog(this); };
-        fset.Controls.AddRange(new Control[] { hSettings, lMode, lModeInfo, cAuto, cAutoSave, cStartup, lSaveInfo, lLang, cLang, bContact });
+        lUsageH = L(new Font("Segoe UI Semibold", 10f), Theme.Sub);
+        lUsageH.Margin = new Padding(0, D(14), 0, 2);
+        lUsage = L(new Font("Segoe UI", 9f), Theme.Sub);
+        lUsage.Margin = new Padding(0, 2, 0, 4);
+        var usageTimer = new WinTimer { Interval = 30000 };
+        usageTimer.Tick += (_, _) => UpdateUsage();
+        usageTimer.Start();
+        fset.Controls.AddRange(new Control[] { hSettings, lMode, lModeInfo, cAuto, cAutoSave, cStartup, lSaveInfo, lLang, cLang, lUsageH, lUsage, bContact });
 
         // profiles card
         var tp = new TableLayoutPanel { ColumnCount = 1, RowCount = 3, BackColor = Theme.Card };
@@ -497,6 +505,8 @@ public sealed class MainForm : Form
         lSaveInfo.Text = Lang.T("save_info");
         lLang.Text = Lang.T("language");
         bContact.Text = "✉ " + Lang.T("contact_title");
+        lUsageH.Text = Lang.T("usage_hdr");
+        UpdateUsage();
         hProfiles.Text = Lang.T("profiles_hdr");
         lv.Columns[0].Text = Lang.T("col_display");
         lv.Columns[1].Text = Lang.T("col_icons");
@@ -723,4 +733,15 @@ public sealed class MainForm : Form
         }
         base.Dispose(disposing);
     }
+
+    // Ayarlar > Kullanım Limitleri
+    void UpdateUsage()
+    {
+        if (lUsage == null) return;
+        var t = Lang.T("usage_none");
+        if (GitHubSync.RateRemaining is int rem && GitHubSync.RateLimit is int lim)
+            t += Environment.NewLine + string.Format(Lang.T("usage_gh"), rem, lim, GitHubSync.RateReset?.ToString("HH:mm") ?? "—");
+        lUsage.Text = t;
+    }
+
 }
