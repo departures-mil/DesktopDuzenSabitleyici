@@ -62,6 +62,7 @@ public static class GitHubSync
         if (!string.IsNullOrEmpty(gistId))
         {
             var res = await http.GetAsync($"https://api.github.com/gists/{gistId}");
+            Capture(res);
             if (res.IsSuccessStatusCode)
             {
                 var g = JsonNode.Parse(await res.Content.ReadAsStringAsync())!;
@@ -101,8 +102,28 @@ public static class GitHubSync
 
     static StringContent Json(JsonNode n) => new(n.ToJsonString(), Encoding.UTF8, "application/json");
 
+    // v1.0.6: Ayarlar > Kullanım Limitleri — GitHub'ın saatlik istek sınırı (kullanıcının kendi anahtarı)
+    public static int? RateRemaining { get; private set; }
+    public static int? RateLimit { get; private set; }
+    public static DateTime? RateReset { get; private set; }
+    public static DateTime? LastSync { get; private set; }
+
+    static void Capture(HttpResponseMessage r)
+    {
+        try
+        {
+            if (r.Headers.TryGetValues("X-RateLimit-Remaining", out var rem) && int.TryParse(rem.FirstOrDefault(), out var a)) RateRemaining = a;
+            if (r.Headers.TryGetValues("X-RateLimit-Limit", out var lim) && int.TryParse(lim.FirstOrDefault(), out var b)) RateLimit = b;
+            if (r.Headers.TryGetValues("X-RateLimit-Reset", out var rs) && long.TryParse(rs.FirstOrDefault(), out var c))
+                RateReset = DateTimeOffset.FromUnixTimeSeconds(c).LocalDateTime;
+            LastSync = DateTime.Now;
+        }
+        catch { }
+    }
+
     static async Task Ensure(HttpResponseMessage r)
     {
+        Capture(r);
         if (r.IsSuccessStatusCode) return;
         string body = "";
         try { body = await r.Content.ReadAsStringAsync(); } catch { }
