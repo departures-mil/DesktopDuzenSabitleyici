@@ -27,6 +27,7 @@ public sealed class MainForm : Form
     Label hStatus = null!, lStatus = null!, lHow = null!, lScreensH = null!, lScreens = null!, lIcons = null!, lSave = null!, lRestore = null!;
     Button bProtect = null!, bSaveNow = null!, bRestore = null!;
     Label hSettings = null!, lMode = null!, lLang = null!;
+    Button bContact = null!;
     CheckBox cAuto = null!, cStartup = null!, cAutoSave = null!;
     Label lSaveInfo = null!, lModeInfo = null!;
     ComboBox cLang = null!;
@@ -380,7 +381,10 @@ public sealed class MainForm : Form
             Storage.SaveSettings(settings);
             ApplyLanguage();
         };
-        fset.Controls.AddRange(new Control[] { hSettings, lMode, lModeInfo, cAuto, cAutoSave, cStartup, lSaveInfo, lLang, cLang });
+        bContact = Theme.ActionButton("", Theme.Card2);
+        bContact.Margin = new Padding(0, D(14), 0, 0);
+        bContact.Click += (_, _) => { using var f = new ContactForm(); f.ShowDialog(this); };
+        fset.Controls.AddRange(new Control[] { hSettings, lMode, lModeInfo, cAuto, cAutoSave, cStartup, lSaveInfo, lLang, cLang, bContact });
 
         // profiles card
         var tp = new TableLayoutPanel { ColumnCount = 1, RowCount = 3, BackColor = Theme.Card };
@@ -485,6 +489,7 @@ public sealed class MainForm : Form
         cAutoSave.Text = Lang.T("autosave");
         lSaveInfo.Text = Lang.T("save_info");
         lLang.Text = Lang.T("language");
+        bContact.Text = "✉ " + Lang.T("contact_title");
         hProfiles.Text = Lang.T("profiles_hdr");
         lv.Columns[0].Text = Lang.T("col_display");
         lv.Columns[1].Text = Lang.T("col_icons");

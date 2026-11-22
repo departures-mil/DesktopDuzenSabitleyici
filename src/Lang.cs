@@ -107,6 +107,17 @@ public static class Lang
         ["sync_ok"] = ("Eşitleme tamamlandı.", "Sync complete.", "اكتملت المزامنة."),
         ["sync_fail"] = ("Eşitleme yapılamadı: {0}", "Sync failed: {0}", "تعذّرت المزامنة: {0}"),
         ["sync_working"] = ("Eşitleniyor…", "Syncing…", "جارٍ المزامنة…"),
+        ["contact_title"] = ("Admin ile iletişime geç", "Contact the admin", "التواصل مع المسؤول"),
+        ["contact_desc"] = ("Programı geliştirmemiz için öneri, istek ve hata bildirimlerinizi yazın; mesajınız doğrudan yöneticiye ulaşır.", "Send suggestions, requests and bug reports to help us improve the program; your message goes straight to the administrator.", "أرسل اقتراحاتك وطلباتك وبلاغات الأخطاء لمساعدتنا على تطوير البرنامج؛ تصل رسالتك مباشرة إلى المسؤول."),
+        ["contact_name"] = ("Adınız (isteğe bağlı)", "Your name (optional)", "اسمك (اختياري)"),
+        ["contact_mail"] = ("E-posta (yanıt için, isteğe bağlı)", "Email (for a reply, optional)", "البريد الإلكتروني (للرد، اختياري)"),
+        ["contact_msg"] = ("Mesajınız", "Your message", "رسالتك"),
+        ["contact_send"] = ("Gönder", "Send", "إرسال"),
+        ["contact_empty"] = ("Lütfen mesajınızı yazın.", "Please write your message.", "يرجى كتابة رسالتك."),
+        ["contact_bad"] = ("E-posta adresi geçerli değil.", "The email address is not valid.", "عنوان البريد الإلكتروني غير صالح."),
+        ["contact_sending"] = ("Gönderiliyor…", "Sending…", "جارٍ الإرسال…"),
+        ["contact_ok"] = ("Mesajınız yöneticiye iletildi. Teşekkürler!", "Your message has been delivered to the administrator. Thank you!", "تم إيصال رسالتك إلى المسؤول. شكرًا لك!"),
+        ["contact_fail"] = ("Mesaj gönderilemedi. İnternet bağlantınızı kontrol edip tekrar deneyin.", "The message could not be sent. Check your internet connection and try again.", "تعذّر إرسال الرسالة. تحقّق من اتصالك بالإنترنت وحاول مجددًا."),
     };
 
     public static string T(string key)
