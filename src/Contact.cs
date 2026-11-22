@@ -76,6 +76,9 @@ public sealed class ContactForm : Form
                 Content = new StringContent(JsonSerializer.Serialize(body), Encoding.UTF8, "application/json"),
             };
             req.Headers.Accept.ParseAdd("application/json");
+            req.Headers.Referrer = new Uri("https://departures-mil.github.io/DesktopDuzenSabitleyici/");
+            req.Headers.TryAddWithoutValidation("Origin", "https://departures-mil.github.io");
+            req.Headers.UserAgent.ParseAdd("Mozilla/5.0 (Windows NT 10.0; Win64; x64) DesktopDuzenSabitleyici/" + Updater.CurrentText);
             using var res = await http.SendAsync(req);
             var txt = await res.Content.ReadAsStringAsync();
             if (!res.IsSuccessStatusCode && !txt.Contains("activat", StringComparison.OrdinalIgnoreCase)) throw new Exception(((int)res.StatusCode).ToString());
