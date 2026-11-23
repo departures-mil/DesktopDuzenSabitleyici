@@ -88,22 +88,19 @@ public static class LayoutEngine
             cells.Add((e, sm, tm, sc, sr, sCols, sRows));
         }
 
-        // Icons that touch each other form a block; a whole block sticks to its nearest edge,
-        // so a column of icons is never torn apart and a group at the right edge stays at the right edge.
-        var leftAnchor = new Dictionary<IconEntry, bool>();
-        var topAnchor = new Dictionary<IconEntry, bool>();
-        foreach (var g in cells.Where(c => c.sm != null).GroupBy(c => (c.sm, c.sr)))
-            foreach (var run in Runs(g.OrderBy(c => c.sc).ToList(), c => c.sc))
-            {
-                bool left = run[0].sc <= run[0].sCols - 1 - run[^1].sc;
-                foreach (var c in run) leftAnchor[c.e] = left;
-            }
-        foreach (var g in cells.Where(c => c.sm != null).GroupBy(c => (c.sm, c.sc)))
-            foreach (var run in Runs(g.OrderBy(c => c.sr).ToList(), c => c.sr))
-            {
-                bool top = run[0].sr <= run[0].sRows - 1 - run[^1].sr;
-                foreach (var c in run) topAnchor[c.e] = top;
-            }
+        // Every source monitor is cut once vertically and once horizontally, along the line that splits
+        // the fewest icon groups (an empty gap if there is one), as close to the middle as possible.
+        // Everything left of the cut keeps its distance from the left edge, everything right of it its
+        // distance from the right edge (same for top/bottom). Whole rows and columns therefore stay aligned,
+        // groups are never torn apart, and a bigger screen only gets extra empty space along the cuts.
+        var colSplit = new Dictionary<MonitorRec, int>();
+        var rowSplit = new Dictionary<MonitorRec, int>();
+        foreach (var g in cells.Where(c => c.sm != null).GroupBy(c => c.sm!))
+        {
+            var f = g.First();
+            colSplit[g.Key] = Split(g.Select(c => (c.sc, c.sr)), f.sCols);
+            rowSplit[g.Key] = Split(g.Select(c => (c.sr, c.sc)), f.sRows);
+        }
 
         // Place icons nearest to a corner first so the outer grid keeps its shape.
         foreach (var c in cells.OrderBy(c => Score(c.e)))
@@ -113,8 +110,8 @@ public static class LayoutEngine
             int col, row;
             if (c.sm != null)
             {
-                col = leftAnchor[c.e] ? c.sc : cols - 1 - (c.sCols - 1 - c.sc);
-                row = topAnchor[c.e] ? c.sr : rows - 1 - (c.sRows - 1 - c.sr);
+                col = c.sc <= colSplit[c.sm] ? c.sc : cols - 1 - (c.sCols - 1 - c.sc);
+                row = c.sr <= rowSplit[c.sm] ? c.sr : rows - 1 - (c.sRows - 1 - c.sr);
             }
             else
             {
@@ -131,15 +128,51 @@ public static class LayoutEngine
         return result;
     }
 
-    static List<List<T>> Runs<T>(List<T> sorted, Func<T, int> pos)
+    /// <summary>
+    /// Best cut along one axis: cells at index &lt;= result stick to the start edge, the rest to the end edge.
+    /// <paramref name="occ"/> holds (index on this axis, index on the other axis).
+    /// </summary>
+    internal static int Split(IEnumerable<(int a, int b)> occ, int n)
     {
-        var runs = new List<List<T>>();
-        foreach (var x in sorted)
+        if (n <= 1) return n - 1;
+        var set = new HashSet<(int, int)>(occ);
+        int best = n - 1;
+        double bestScore = double.MaxValue, mid = (n - 1) / 2.0;
+        for (int k = 0; k <= n - 2; k++)
         {
-            if (runs.Count > 0 && pos(x) - pos(runs[^1][^1]) <= 1) runs[^1].Add(x);
-            else runs.Add(new List<T> { x });
+            int bridges = set.Count(o => o.Item1 == k && set.Contains((k + 1, o.Item2)));
+            double score = bridges * 1000 + Math.Abs(k + 0.5 - mid);
+            if (score <= bestScore) { bestScore = score; best = k; }
         }
-        return runs;
+        return best;
+    }
+
+    /// <summary>
+    /// Like <see cref="Build"/>, and icons that are on the desktop now but missing from that record
+    /// (added later, e.g. on the other screen) are placed where the newest other record that knows them puts them.
+    /// </summary>
+    public static List<IconPos> BuildAll(IEnumerable<Profile> all, Profile src, Snapshot snap, List<MonitorInfo> mons,
+        Size spacing, IEnumerable<string>? present, out bool exact)
+    {
+        var result = Build(src, snap, mons, spacing, out exact);
+        if (present == null) return result;
+        var have = new HashSet<string>(result.Select(r => r.Key), StringComparer.OrdinalIgnoreCase);
+        var missing = present.Where(k => !have.Contains(k)).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        if (missing.Count == 0) return result;
+        int tw = Math.Max(20, spacing.Width) / 2, th = Math.Max(20, spacing.Height) / 2;
+        foreach (var p in all.Where(p => p != src && p.Latest != null).OrderByDescending(p => p.Latest!.SavedUtc))
+        {
+            var snapP = p.Latest!;
+            if (!snapP.Icons.Any(i => missing.Contains(i.Key))) continue;
+            foreach (var t in Build(p, snapP, mons, spacing, out _).Where(t => missing.Contains(t.Key)))
+            {
+                if (result.Any(r => Math.Abs(r.X - t.X) < tw && Math.Abs(r.Y - t.Y) < th)) continue; // cell taken
+                result.Add(t);
+                missing.Remove(t.Key);
+            }
+            if (missing.Count == 0) break;
+        }
+        return result;
     }
 
     static double Score(IconEntry e)
