@@ -359,14 +359,15 @@ public sealed class Guardian : IDisposable
         return any == null ? null : (any, any.Latest!);
     }
 
-    List<IconPos>? ComputeTarget(out bool exact)
+    List<IconPos>? ComputeTarget(out bool exact, IEnumerable<string>? present = null)
     {
         exact = false;
         Monitors = DisplayInfo.GetMonitors();
         lastKey = DisplayInfo.KeyOf(Monitors);
         (Profile p, Snapshot s)? src = forcedSnapId != null ? store.Find(forcedSnapId) : ChooseSource();
         if (src == null || src.Value.s.Icons.Count == 0) return null;
-        return LayoutEngine.Build(src.Value.p, src.Value.s, Monitors, DesktopIcons.LastSpacing, out exact);
+        return LayoutEngine.BuildAll(store.Displays.Values, src.Value.p, src.Value.s, Monitors,
+            DesktopIcons.LastSpacing, present, out exact);
     }
 
     void OnRestoreStep()
@@ -376,9 +377,10 @@ public sealed class Guardian : IDisposable
         {
             if (restoreStep == 0)
             {
-                try { DesktopIcons.Read(); } catch { } // refresh spacing for the new screen
+                List<string>? present = null;
+                try { present = DesktopIcons.Read().Select(i => i.Key).ToList(); } catch { } // also refreshes spacing for the new screen
                 targetManual = forcedSnapId != null;
-                target = ComputeTarget(out targetExact);
+                target = ComputeTarget(out targetExact, present);
                 if (target == null) { Finish(); return; }
                 int n = DesktopIcons.Write(target, settings.DisableAutoArrange);
                 LastRestore = DateTime.Now;
