@@ -157,7 +157,7 @@ public sealed class PreviewForm : Form
         string cur = currentKey();
         bool isCurrent = p.Key == cur;
         var curMons = DisplayInfo.GetMonitors();
-        bool sameScreens = isCurrent || LayoutEngine.SameScreens(p, curMons);
+        bool sameScreens = isCurrent || DDS.LayoutEngine.SameScreens(p, curMons);
 
         lTitle.Text = (p.Display.Length > 0 ? p.Display : p.Key).Replace("  +  ", "   +   ");
         if (isCurrent)
@@ -229,7 +229,7 @@ public sealed class PreviewForm : Form
             mons = cur.Select(MonitorRec.From).ToList();
             spacing = DesktopIcons.LastSpacing;
             List<IconPos> t;
-            try { t = LayoutEngine.Build(p, s, cur, spacing, out _); } catch { t = new(); }
+            try { t = DDS.LayoutEngine.Build(p, s, cur, spacing, out _); } catch { t = new(); }
             icons = t.Select(i => (i.Key, i.X, i.Y)).ToList();
         }
         else
