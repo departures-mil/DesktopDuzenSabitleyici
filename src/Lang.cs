@@ -92,6 +92,7 @@ public static class Lang
         ["upd_checking"] = ("Güncellemeler denetleniyor…", "Checking for updates…", "جارٍ التحقق من التحديثات…"),
         ["upd_latest"] = ("En güncel sürümü kullanıyorsunuz (v{0}).", "You are on the latest version (v{0}).", "أنت تستخدم أحدث إصدار (v{0})."),
         ["upd_downloading"] = ("v{0} indiriliyor…", "Downloading v{0}…", "جارٍ تنزيل v{0}…"),
+        ["upd_downloading_patch"] = ("v{0} indiriliyor (yalnızca değişen kısımlar)…", "Downloading v{0} (changes only)…", "جارٍ تنزيل v{0} (التغييرات فقط)…"),
         ["upd_progress"] = ("%{0}   •   {1:F1} MB / {2:F1} MB   •   Kalan: {3:F1} MB   •   Hız: {4:F2} MB/sn",
                             "{0}%   •   {1:F1} MB / {2:F1} MB   •   Remaining: {3:F1} MB   •   Speed: {4:F2} MB/s",
                             "{0}%   •   {1:F1} MB / {2:F1} MB   •   المتبقي: {3:F1} MB   •   السرعة: {4:F2} MB/ث"),

@@ -43,6 +43,32 @@ jobs:
           -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true
           -p:EnableCompressionInSingleFile=true -p:DebugType=none -o out
 
+      # Small "changes only" patches from the last 5 releases → the in-app updater downloads
+      # these (~0.1–2 MB) instead of the full exe. Every patch is verified by applying it here.
+      - name: Build update patches
+        if: github.ref == 'refs/heads/main' && steps.ver.outputs.exists != 'True'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          New-Item -ItemType Directory -Force patches, prev | Out-Null
+          dotnet build tools/DeltaMaker -c Release -o tools/bin | Out-Null
+          $tags = gh release list --repo "${{ github.repository }}" --limit 5 --json tagName --jq '.[].tagName'
+          foreach ($t in $tags) {
+            $v = $t.TrimStart('v')
+            $old = "prev/$v.exe"
+            gh release download $t --repo "${{ github.repository }}" -p DesktopDuzenSabitleyici.exe -O $old --clobber
+            if ($LASTEXITCODE -ne 0 -or -not (Test-Path $old)) { Write-Host "skip $t"; continue }
+            $patch = "patches/DesktopDuzenSabitleyici-patch-from-$v.bin"
+            tools/bin/DeltaMaker.exe make $old out/DesktopDuzenSabitleyici.exe $patch
+            tools/bin/DeltaMaker.exe apply $old $patch prev/check.exe
+            if ($LASTEXITCODE -ne 0) { Remove-Item $patch; continue }
+            if ((Get-FileHash prev/check.exe).Hash -ne (Get-FileHash out/DesktopDuzenSabitleyici.exe).Hash) { Remove-Item $patch; continue }
+            # a patch bigger than 70% of the full file is not worth it
+            if ((Get-Item $patch).Length -gt 0.7 * (Get-Item out/DesktopDuzenSabitleyici.exe).Length) { Remove-Item $patch }
+          }
+          Get-ChildItem patches | Format-Table Name, Length
+
       - uses: actions/upload-artifact@v4
         with:
           name: DesktopDuzenSabitleyici-v${{ steps.ver.outputs.version }}
@@ -54,6 +80,8 @@ jobs:
         with:
           tag_name: v${{ steps.ver.outputs.version }}
           name: Desktop Düzen Sabitleyici v${{ steps.ver.outputs.version }}
-          files: out/DesktopDuzenSabitleyici.exe
+          files: |
+            out/DesktopDuzenSabitleyici.exe
+            patches/*.bin
           generate_release_notes: true
           make_latest: true
