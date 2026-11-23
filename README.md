@@ -30,3 +30,8 @@ anahtarı girmeniz gerekir. Anahtar girildikten sonra eşitleme her 5 dakikada b
 
 `main` dalına yapılan her gönderimde GitHub Actions uygulamayı derler. `.csproj` içindeki `<Version>` için henüz bir yayın yoksa
 `vX.Y.Z` yayınını otomatik oluşturur.
+
+## Küçük güncellemeler (yalnızca değişen kısımlar)
+Her yayında CI, son 5 sürümün her biri için `DesktopDuzenSabitleyici-patch-from-X.Y.Z.bin` yaması üretir ve doğrular.
+Uygulama önce bu yamayı indirir (genelde 1 MB'ın altında), bilgisayardaki exe ile birleştirir ve SHA-256 ile doğrular.
+Yama yoksa veya bir sorun çıkarsa otomatik olarak tam dosyaya geçer.

@@ -65,11 +65,16 @@ public sealed class UpdateForm : Form
 
             lTitle.Text = Lang.F("upd_downloading", info.Version.ToString(3));
             downloading = true;
-            Progress(0, info.Size, 0);
+            Progress(0, info.PatchUrl != null ? info.PatchSize : info.Size, 0);
+            var ver = info.Version.ToString(3);
             var file = await Updater.DownloadAsync(info, (d, t, s) =>
             {
                 if (InvokeRequired) BeginInvoke(() => Progress(d, t, s)); else Progress(d, t, s);
-            }, cts.Token);
+            }, cts.Token, patch =>
+            {
+                void Set() => lTitle.Text = Lang.F(patch ? "upd_downloading_patch" : "upd_downloading", ver);
+                if (InvokeRequired) BeginInvoke(Set); else Set();
+            });
             downloading = false;
 
             lTitle.Text = Lang.T("upd_installing");
