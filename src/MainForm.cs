@@ -25,7 +25,7 @@ public sealed class MainForm : Form
     Button bUpdate = null!, bSync = null!, bMin = null!, bHalf = null!, bClose = null!;
     TableLayoutPanel content = null!;
     Label hStatus = null!, lStatus = null!, lHow = null!, lScreensH = null!, lScreens = null!, lIcons = null!, lSave = null!, lRestore = null!;
-    Button bProtect = null!, bSaveNow = null!, bRestore = null!;
+    Button bProtect = null!, bSaveNow = null!, bRestore = null!, bPreviewNow = null!;
     Label hSettings = null!, lMode = null!, lLang = null!;
     Button bContact = null!;
     Button bBell = null!;
@@ -36,7 +36,7 @@ public sealed class MainForm : Form
     ComboBox cLang = null!;
     Label hProfiles = null!, hLog = null!;
     ListView lv = null!;
-    Button bDel = null!, bRestoreSel = null!;
+    Button bDel = null!, bRestoreSel = null!, bPreviewSel = null!;
     ListBox lb = null!;
     ContextMenuStrip trayMenu = null!;
     ToolStripMenuItem miOpen = null!, miSave = null!, miRestore = null!, miExit = null!;
@@ -347,7 +347,9 @@ public sealed class MainForm : Form
         bProtect.Click += (_, _) => ToggleProtect();
         bSaveNow.Click += (_, _) => guard.SaveNow("manual");
         bRestore.Click += (_, _) => guard.RestoreNow();
-        actions.Controls.AddRange(new Control[] { bSaveNow, bRestore, bProtect });
+        bPreviewNow = Theme.ActionButton("", Color.FromArgb(124, 58, 237));
+        bPreviewNow.Click += (_, _) => OpenPreview(null);
+        actions.Controls.AddRange(new Control[] { bSaveNow, bRestore, bPreviewNow, bProtect });
         fs.Controls.AddRange(new Control[] { hStatus, lStatus, lHow, lScreensH, lScreens, lIcons, lSave, lRestore, actions });
         fs.SizeChanged += (_, _) => actions.MaximumSize = new Size(Math.Max(100, fs.ClientSize.Width - D(12)), 0);
 
@@ -418,7 +420,7 @@ public sealed class MainForm : Form
         lv.Columns.Add("", 140);
         lv.Columns.Add("", 120);
         lv.MultiSelect = false;
-        lv.DoubleClick += (_, _) => RestoreSelected();
+        lv.DoubleClick += (_, _) => OpenPreview(SelectedSnap());
         lv.DrawColumnHeader += (_, e) =>
         {
             using var bg = new SolidBrush(Theme.Card);
@@ -434,8 +436,10 @@ public sealed class MainForm : Form
         bDel.Click += (_, _) => DeleteSelected();
         bRestoreSel = Theme.ActionButton("", Theme.Green);
         bRestoreSel.Click += (_, _) => RestoreSelected();
+        bPreviewSel = Theme.ActionButton("", Color.FromArgb(124, 58, 237));
+        bPreviewSel.Click += (_, _) => OpenPreview(SelectedSnap());
         var hb = new FlowLayoutPanel { AutoSize = true, WrapContents = true, BackColor = Theme.Card, Margin = Padding.Empty };
-        hb.Controls.AddRange(new Control[] { bRestoreSel, bDel });
+        hb.Controls.AddRange(new Control[] { bPreviewSel, bRestoreSel, bDel });
         tp.Controls.Add(hProfiles, 0, 0);
         tp.Controls.Add(lv, 0, 1);
         tp.Controls.Add(hb, 0, 2);
@@ -496,6 +500,7 @@ public sealed class MainForm : Form
         lScreensH.Text = Lang.T("screens");
         bSaveNow.Text = Lang.T("save_now");
         bRestore.Text = Lang.T("restore_now");
+        bPreviewNow.Text = "🖥  " + Lang.T("preview_now");
         hSettings.Text = Lang.T("settings_hdr");
         lMode.Text = Lang.T("mode");
         lModeInfo.Text = Lang.T("mode_info");
@@ -513,6 +518,8 @@ public sealed class MainForm : Form
         lv.Columns[2].Text = Lang.T("col_date");
         lv.Columns[3].Text = Lang.T("col_src");
         bRestoreSel.Text = Lang.T("restore_sel");
+        bPreviewSel.Text = "🖥  " + Lang.T("preview_sel");
+        tips.SetToolTip(bPreviewSel, Lang.T("tt_preview"));
         lv.RightToLeftLayout = rtl;
         bDel.Text = Lang.T("delete");
         hLog.Text = Lang.T("log_hdr");
@@ -594,6 +601,17 @@ public sealed class MainForm : Form
     void RestoreSelected()
     {
         if (SelectedSnap() is string id) guard.RestoreSnapshot(id);
+    }
+
+    /// <summary>Opens the big screen preview for a record (null = the newest record of the screen in use now).</summary>
+    void OpenPreview(string? snapId)
+    {
+        var ids = lv.Items.Cast<ListViewItem>().Select(i => i.Tag as string).OfType<string>().ToList();
+        if (ids.Count == 0) { OnLog("log_noLayout", Array.Empty<object>()); return; }
+        snapId ??= store.Displays.TryGetValue(guard.CurrentKey, out var cp) && cp.Latest != null ? cp.Latest.Id : ids[0];
+        int idx = Math.Max(0, ids.IndexOf(snapId));
+        using var f = new PreviewForm(store, ids, idx, () => guard.CurrentKey, id => guard.RestoreSnapshot(id));
+        f.ShowDialog(this);
     }
 
     void DeleteSelected()
