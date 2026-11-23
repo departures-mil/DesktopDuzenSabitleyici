@@ -34,7 +34,8 @@ public sealed class MainForm : Form
     Label lSaveInfo = null!, lModeInfo = null!;
     Label lUsageH = null!, lUsage = null!;
     ComboBox cLang = null!;
-    Label hProfiles = null!, hLog = null!;
+    Label hProfiles = null!, hLog = null!, hPreview = null!, lPvInfo = null!;
+    LayoutPreview preview = null!;
     ListView lv = null!;
     Button bDel = null!, bRestoreSel = null!, bPreviewSel = null!;
     ListBox lb = null!;
@@ -350,8 +351,23 @@ public sealed class MainForm : Form
         bPreviewNow = Theme.ActionButton("", Color.FromArgb(124, 58, 237));
         bPreviewNow.Click += (_, _) => OpenPreview(null);
         actions.Controls.AddRange(new Control[] { bSaveNow, bRestore, bPreviewNow, bProtect });
-        fs.Controls.AddRange(new Control[] { hStatus, lStatus, lHow, lScreensH, lScreens, lIcons, lSave, lRestore, actions });
+        hLog = L(new Font("Segoe UI Semibold", 10f), Theme.Sub);
+        hLog.Margin = new Padding(0, D(14), 0, 2);
+        lb = new ListBox
+        {
+            BackColor = Theme.Card2, ForeColor = Theme.Sub, BorderStyle = BorderStyle.None,
+            IntegralHeight = false, Margin = new Padding(0, D(4), 0, 0), Font = new Font("Segoe UI", 9.5f),
+            HorizontalScrollbar = true,
+        };
+        fs.Controls.AddRange(new Control[] { hStatus, lStatus, lHow, lScreensH, lScreens, lIcons, lSave, lRestore, actions, hLog, lb });
         fs.SizeChanged += (_, _) => actions.MaximumSize = new Size(Math.Max(100, fs.ClientSize.Width - D(12)), 0);
+        // the activity list takes whatever room is left at the bottom of the status card
+        fs.Layout += (_, _) =>
+        {
+            int w = Math.Max(D(100), fs.ClientSize.Width - D(12));
+            int h = Math.Max(D(90), fs.ClientSize.Height - lb.Top - D(4));
+            if (lb.Width != w || lb.Height != h) lb.Size = new Size(w, h);
+        };
 
         // settings card
         var fset = Flow();
@@ -421,6 +437,7 @@ public sealed class MainForm : Form
         lv.Columns.Add("", 120);
         lv.MultiSelect = false;
         lv.DoubleClick += (_, _) => OpenPreview(SelectedSnap());
+        lv.SelectedIndexChanged += (_, _) => UpdatePreview();
         lv.DrawColumnHeader += (_, e) =>
         {
             using var bg = new SolidBrush(Theme.Card);
@@ -444,18 +461,23 @@ public sealed class MainForm : Form
         tp.Controls.Add(lv, 0, 1);
         tp.Controls.Add(hb, 0, 2);
 
-        // log card
-        var tl = new TableLayoutPanel { ColumnCount = 1, RowCount = 2, BackColor = Theme.Card };
+        // preview card: shows the record selected in the history list (one click is enough)
+        var tl = new TableLayoutPanel { ColumnCount = 1, RowCount = 3, BackColor = Theme.Card };
+        tl.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         tl.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         tl.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-        hLog = L(hFont);
-        lb = new ListBox
+        hPreview = L(hFont);
+        lPvInfo = L(new Font("Segoe UI", 9f), Theme.Sub);
+        lPvInfo.AutoEllipsis = true;
+        preview = new LayoutPreview(store, () => guard?.CurrentKey ?? "")
         {
-            Dock = DockStyle.Fill, BackColor = Theme.Card2, ForeColor = Theme.Sub, BorderStyle = BorderStyle.None,
-            IntegralHeight = false, Margin = new Padding(0, D(6), 0, 0), Font = new Font("Segoe UI", 9.5f),
+            Dock = DockStyle.Fill, Compact = true, Margin = new Padding(0, D(6), 0, 0), Cursor = Cursors.Hand,
         };
-        tl.Controls.Add(hLog, 0, 0);
-        tl.Controls.Add(lb, 0, 1);
+        preview.DoubleClick += (_, _) => OpenPreview(preview.SnapId);
+        tl.SizeChanged += (_, _) => lPvInfo.MaximumSize = new Size(Math.Max(100, tl.ClientSize.Width - D(8)), 0);
+        tl.Controls.Add(hPreview, 0, 0);
+        tl.Controls.Add(lPvInfo, 0, 1);
+        tl.Controls.Add(preview, 0, 2);
 
         content.Controls.Add(Card(fs), 0, 0);
         content.Controls.Add(Card(fset), 1, 0);
@@ -523,6 +545,9 @@ public sealed class MainForm : Form
         lv.RightToLeftLayout = rtl;
         bDel.Text = Lang.T("delete");
         hLog.Text = Lang.T("log_hdr");
+        hPreview.Text = Lang.T("pv_title");
+        preview.EmptyText = Lang.T("log_noLayout");
+        tips.SetToolTip(preview, Lang.T("pv_side_tt"));
         miOpen.Text = Lang.T("tray_open");
         miSave.Text = Lang.T("save_now");
         miRestore.Text = Lang.T("restore_now");
@@ -592,8 +617,27 @@ public sealed class MainForm : Form
                 lv.Items.Add(it);
             }
         }
+        if (lv.SelectedItems.Count == 0 && lv.Items.Count > 0) lv.Items[0].Selected = true;
         lv.EndUpdate();
         FitColumns();
+        UpdatePreview();
+    }
+
+    /// <summary>Shows the selected record (or the newest one of the current screen) in the side preview.</summary>
+    void UpdatePreview()
+    {
+        if (preview == null) return;
+        string? id = SelectedSnap();
+        if (id == null && guard != null && store.Displays.TryGetValue(guard.CurrentKey, out var cp)) id = cp.Latest?.Id;
+        preview.SnapId = id;
+        if (id == null || store.Find(id) is not { } f) { lPvInfo.Text = ""; return; }
+        var (p, s) = f;
+        bool cur = guard != null && p.Key == guard.CurrentKey;
+        string name = (p.Display.Length > 0 ? p.Display : p.Key);
+        lPvInfo.Text = (cur ? "✔ " : "⚠ ") + name + "   ·   " + s.SavedUtc.ToLocalTime().ToString("dd.MM.yyyy HH:mm") +
+            "   ·   " + Lang.F("pv_icons_on", s.Icons.Count) + "   ·   " + Lang.T("src_" + s.Source) +
+            (cur ? "" : "   ·   " + Lang.T("pv_other_short"));
+        lPvInfo.ForeColor = cur ? Theme.Sub : Color.FromArgb(251, 191, 36);
     }
 
     string? SelectedSnap() => lv.SelectedItems.Count > 0 ? lv.SelectedItems[0].Tag as string : null;

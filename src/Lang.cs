@@ -125,6 +125,8 @@ public static class Lang
         ["pv_prev"] = ("Önceki kayıt", "Previous record", "السجل السابق"),
         ["pv_next"] = ("Sonraki kayıt", "Next record", "السجل التالي"),
         ["pv_hint"] = ("← → tuşlarıyla kayıtlar arasında gezin · simgenin üzerine gelince adı görünür", "Use ← → to move between records · hover an icon to see its name", "استخدم ← → للتنقل بين السجلات · مرّر فوق أيقونة لرؤية اسمها"),
+        ["pv_side_tt"] = ("Listede bir kayda tıklayın, burada görünür · çift tıklayınca büyük önizleme açılır", "Click a record in the list to see it here · double-click for the large preview", "انقر على سجل في القائمة ليظهر هنا · انقر نقراً مزدوجاً للمعاينة الكبيرة"),
+        ["pv_other_short"] = ("başka bir ekrana ait", "belongs to another screen", "يخص شاشة أخرى"),
         ["pv_restore"] = ("Bu düzeni geri yükle", "Restore this layout", "استعادة هذا الترتيب"),
         ["pv_close"] = ("Kapat", "Close", "إغلاق"),
         ["pv_outside"] = ("{0} simge hiçbir ekranın içinde değil (görünmeyen alanda kalmış)", "{0} icons are outside every screen (in an invisible area)", "{0} أيقونة خارج كل الشاشات (في منطقة غير مرئية)"),
