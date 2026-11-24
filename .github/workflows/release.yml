@@ -81,6 +81,18 @@ jobs:
           }
           Get-ChildItem screens | Format-Table Name, Length
           if ($fail -gt 0) { exit 1 }
+      - name: Ekran görüntülerini ci-ekran dalına koy (inceleme için; uygulama dalı değil)
+        if: always() && github.ref != 'refs/heads/main'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          [ -d screens ] && ls screens/*.png >/dev/null 2>&1 || exit 0
+          mkdir ../ekran && cp screens/*.png ../ekran/ && cd ../ekran
+          git init -q && git checkout -q -b ci-ekran
+          git -c user.name=ci -c user.email=ci@users.noreply.github.com add . 
+          git -c user.name=ci -c user.email=ci@users.noreply.github.com commit -qm "ekran görüntüleri ${GITHUB_SHA::7}"
+          git push -qf "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" ci-ekran || echo "::warning::ci-ekran gönderilemedi"
       - uses: actions/upload-artifact@v4
         if: always()
         with:
