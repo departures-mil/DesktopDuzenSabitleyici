@@ -172,10 +172,11 @@ public sealed class OnboardingForm : Form
         Text = CoreStrings.T("fc.ob.title");
         Theme.Dialog(this);
         Theme.DarkTitle(this);
-        ClientSize = new Size(FormKit.D(this, 640), FormKit.D(this, 540));
+        ClientSize = new Size(FormKit.D(this, 660), FormKit.D(this, step == 1 ? 680 : 520));
         int w = FormKit.D(this, 588);
         var col = FormKit.Col();
         col.Padding = new Padding(FormKit.D(this, 24), FormKit.D(this, 18), FormKit.D(this, 24), 0);
+        Theme.DarkScroll(col);
         col.Controls.Add(FormKit.Lbl(CoreStrings.T("fc.ob.step", new Dictionary<string, object?> { ["i"] = step + 1, ["n"] = Steps }), 9f, true, Theme.Accent));
 
         if (step == 0)
@@ -342,6 +343,7 @@ public sealed class ContactForm : Form
         tMsg = Theme.Box(true);
         tMsg.MaxLength = 5000;
         tMsg.Size = new Size(w, FormKit.D(this, 150));
+        tMsg.Font = Theme.F(10f);
         col.Controls.Add(tMsg);
         col.Controls.Add(FormKit.Lbl(CoreStrings.T("fc.contact.reach"), 10f, true, Theme.Label));
         tReach = Theme.Box();
@@ -409,6 +411,7 @@ public sealed class ArchiveForm : Form
             View = View.Details, FullRowSelect = true, MultiSelect = false, Dock = DockStyle.Fill, BorderStyle = BorderStyle.None,
             BackColor = Theme.Input, ForeColor = Theme.Text, HeaderStyle = ColumnHeaderStyle.Nonclickable, RightToLeftLayout = Lang.IsRtl,
         };
+        Theme.DarkScroll(lv);
         lv.Columns.Add(Lang.T("col_display"), FormKit.D(this, 280));
         lv.Columns.Add(Lang.T("col_icons"), FormKit.D(this, 60));
         lv.Columns.Add(Lang.T("col_date"), FormKit.D(this, 130));

@@ -13,28 +13,39 @@ Masaüstü simgelerinin yerini korur. Laptop ekranı, büyük monitör, farklı 
 
 ## Kurulum
 
-[Releases](../../releases/latest) sayfasından `DesktopDuzenSabitleyici.exe` dosyasını indirip çalıştırın. Uygulama kendini
-`%LOCALAPPDATA%\Programs\DesktopDuzenSabitleyici` klasörüne kurar, masaüstüne ve Başlat menüsüne kısayol ekler. Yönetici izni gerekmez.
+[Releases](../../releases/latest) sayfasından `DesktopDuzenSabitleyici-Setup-X.Y.Z.exe` kurulumunu indirip çalıştırın (tek tık, kullanıcı
+başına, yönetici izni gerekmez). Program `%LOCALAPPDATA%\Programs\DesktopDuzenSabitleyici` klasörüne kurulur, masaüstüne ve Başlat
+menüsüne kısayol eklenir, "Uygulamalar" listesinden kaldırılabilir. Kayıtlarınız `%APPDATA%\DesktopDuzenSabitleyici` klasöründedir;
+kurulum da kaldırma da onlara dokunmaz. Tek `DesktopDuzenSabitleyici.exe` dosyasını doğrudan çalıştırmak da hâlâ olur (kendini aynı klasöre kurar).
 
 ## Güncelleme
 
 Sağ üstteki ⬇ butonuna basmanız yeterli. Uygulama yeni sürümü GitHub'dan indirir, indirirken yüzdeyi, MB miktarını, kalan MB'yi ve
-hızı gösterir, sonra kendini yeniler. Yeni sürüm çıktığında buton yeşile döner.
+hızı gösterir (yama kipinde "yalnızca değişen kısımlar"), SHA-256 ile doğrular ve kendini yeniler. Yeni sürüm çıktığında buton yeşile döner.
 
 ## Eşitleme
 
 ⇅ butonu, düzenlerinizi GitHub hesabınızdaki gizli bir gist'e yedekler ve diğer bilgisayarlarla eşitler. Bunun için bir kez erişim
 anahtarı girmeniz gerekir. Anahtar girildikten sonra eşitleme her 5 dakikada bir kendiliğinden yapılır.
+Hiçbir kayıt silinmez ya da üstüne yazılmaz: "Arşive taşı" dediğiniz, 25 kayıt sınırını aşan ya da eşitlemede çakışan kayıtlar
+Ayarlar → Arşiv'de durur ve geri alınabilir; başka bilgisayarda arşive taşınan kayıt burada da arşive gider.
+
+## Görünüm
+
+Varsayılan Falcon görünümü (Inter / Noto Sans Arabic yazı tipleri). Ayarlar → Görünüm: 8 renk şeması (Falcon, Klasik = 1.0.x'in
+renkleri, Zümrüt, Gün batımı, Mor, Okyanus, Grafit, Yüksek kontrast), koyu / açık / otomatik tema, yazı boyutu. Sağ üstte tema ve dil düğmeleri.
 
 ## Geliştirme
 
-`main` dalına yapılan her gönderimde GitHub Actions uygulamayı derler. `.csproj` içindeki `<Version>` için henüz bir yayın yoksa
-`vX.Y.Z` yayınını otomatik oluşturur.
+Ayrıntılar: `CLAUDE.md`. Her gönderimde GitHub Actions test eder ve derler; `main`'de `.csproj` `<Version>` için henüz yayın yoksa
+ortak çekirdeğin release iş akışıyla `vX.Y.Z` yayınlanır.
 
 ## Küçük güncellemeler (yalnızca değişen kısımlar)
-Her yayında CI, son 5 sürümün her biri için `DesktopDuzenSabitleyici-patch-from-X.Y.Z.bin` yaması üretir ve doğrular.
-Uygulama önce bu yamayı indirir (genelde 1 MB'ın altında), bilgisayardaki exe ile birleştirir ve SHA-256 ile doğrular.
-Yama yoksa veya bir sorun çıkarsa otomatik olarak tam dosyaya geçer.
+Her yayında CI (ortak çekirdek `reusable-release.yml`) son 5 sürümün her biri için FCD1 biçiminde
+`DesktopDuzenSabitleyici-win-exe.patch-from-X.Y.Z.bin` yaması üretir, doğrular ve `latest.json`'a yazar.
+Uygulama önce bu yamayı indirir, bilgisayardaki exe ile birleştirir ve SHA-256 ile doğrular. Yama yoksa veya bir sorun çıkarsa
+otomatik olarak tam dosyaya geçer. 1.0.x sürümleri için eski biçimde (`DesktopDuzenSabitleyici-patch-from-X.Y.Z.bin`, DDSD1) köprü
+yamaları da eklenir.
 
 ## Asistan Agent (1.0.12)
 `src/FcAgent.cs` + `src/FcAgentDil.cs` (= ortak-cekirdek/dotnet): bütün programlardaki çalışmayı sayılarla izler, çevrim dışı kurallarla öneri
