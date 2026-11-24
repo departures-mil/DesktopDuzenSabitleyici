@@ -314,6 +314,15 @@ await Group("KÖPRÜ: 1.0.11 güncelleyicisi + yeni istemci, yerel sahte GitHub 
     http.Stop();
 });
 
+// 1.1.1: Ayarlar'daki Asistan Agent düğmesi agent başlatılmadan da çevrili (Arapça Türkçe kalmasın)
+{
+    var keep = DDS.Lang.Current;
+    DDS.Lang.Current = "ar"; var ar = DDS.Lang.T("agent_title");
+    DDS.Lang.Current = "en"; var en = DDS.Lang.T("agent_title");
+    DDS.Lang.Current = keep;
+    Ok(ar == "الوكيل المساعد" && en == "Assistant Agent", "Asistan Agent düğme metni tr/en/ar");
+}
+
 string WriteTmp(string name, byte[] b) { var p = Path.Combine(tmp, name); File.WriteAllBytes(p, b); return p; }
 
 try { Directory.Delete(tmp, true); } catch { }

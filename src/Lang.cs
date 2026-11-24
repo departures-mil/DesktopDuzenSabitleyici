@@ -165,6 +165,7 @@ public static class Lang
         ["contact_mail"] = ("E-posta (yanıt için, isteğe bağlı)", "Email (for a reply, optional)", "البريد الإلكتروني (للرد، اختياري)"),
         ["contact_msg"] = ("Mesajınız", "Your message", "رسالتك"),
         ["contact_send"] = ("Gönder", "Send", "إرسال"),
+        ["agent_title"] = ("Asistan Agent", "Assistant Agent", "الوكيل المساعد"),   // 1.1.1: agent başlatılmadan da çevrili
         ["contact_empty"] = ("Lütfen mesajınızı yazın.", "Please write your message.", "يرجى كتابة رسالتك."),
         ["contact_bad"] = ("E-posta adresi geçerli değil.", "The email address is not valid.", "عنوان البريد الإلكتروني غير صالح."),
         ["contact_sending"] = ("Gönderiliyor…", "Sending…", "جارٍ الإرسال…"),

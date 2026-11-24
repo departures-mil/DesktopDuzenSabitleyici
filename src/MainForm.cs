@@ -855,7 +855,7 @@ public sealed class MainForm : Form
     void UpdateAgentButton()
     {
         if (bAgent == null || bAgentTop == null) return;
-        bAgent.Text = "✦ " + (agent?.T("title") ?? "Asistan Agent");
+        bAgent.Text = "✦ " + (agent?.T("title") ?? Lang.T("agent_title"));
         bAgentTop.Text = agent?.ButtonText ?? "✦";
         bAgentTop.Visible = agent != null && agent.On && agent.Panel;
     }

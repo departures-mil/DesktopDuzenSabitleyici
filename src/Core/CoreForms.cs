@@ -7,6 +7,10 @@ public static class News
 {
     public static readonly (string v, string tr, string en, string ar)[] Items =
     {
+        ("1.1.1",
+         "Arapça: Ayarlar'daki Asistan Agent düğmesi artık çevrili",
+         "Arabic: the Assistant Agent button in Settings is now translated",
+         "العربية: أصبح زر الوكيل المساعد في الإعدادات مترجماً"),
         ("1.1.0",
          "Yeni Falcon görünümü (Inter yazı tipi, yuvarlak kartlar); Ayarlar → Görünüm'de 8 renk şeması (eski görünüm: Klasik), koyu / açık / otomatik tema ve yazı boyutu\n" +
          "Güncellemeler ortak sisteme geçti: latest.json + yalnızca değişen kısımlar (FCD1), SHA-256 doğrulaması\n" +
