@@ -132,10 +132,38 @@ public static class GitHubSync
         throw new HttpRequestException(msg.Trim());
     }
 
-    static StoreData Merge(StoreData local, StoreData? remote)
+    static StoreData Merge(StoreData local, StoreData? remote) => SyncMerge.Merge(local, remote);
+}
+
+/// <summary>
+/// Gist eşitlemesinin birleştirme kuralı (ortak çekirdek eşitleme kuralı, v1.1.0):
+/// hiçbir kayıt silinmez ya da üstüne yazılmaz.
+///  - İki taraftaki geçmiş kimliğe (Id) göre birleşir (birleşim).
+///  - Bir tarafta arşive taşınmış (silinmiş) kayıt, diğer tarafta da arşive gider — kalıcı silme yok.
+///  - Aynı kimlikli kayıt iki tarafta farklıysa: güçlü kaynak (elle kayıt) ya da yerel olan kalır,
+///    simgeleri farklıysa öbür hali arşive "conflict" olarak girer.
+///  - Geçmiş sınırını (25) aşan kayıtlar arşive gider.
+/// 1.0.x istemcileri arşivi bilmez; onların yüklediği veride eksik kalan kayıtlar burada birleşimle geri gelir.
+/// </summary>
+public static class SyncMerge
+{
+    static int Rank(string s) => s is "manual" or "hotkey" ? 2 : s == "user" ? 1 : 0;
+
+    public static StoreData Merge(StoreData local, StoreData? remote)
     {
         if (remote == null) return local;
         var m = new StoreData { LastKey = local.LastKey };
+
+        // 1) arşiv: kimliğe göre birleşim, "geri alındı" VEYA ile
+        foreach (var a in local.Archive.Concat(remote.Archive))
+        {
+            var ex = m.Archive.FirstOrDefault(x => x.Snap.Id == a.Snap.Id);
+            if (ex == null) m.Archive.Add(a);
+            else ex.Restored |= a.Restored;
+        }
+        var archived = new HashSet<string>(m.Archive.Select(a => a.Snap.Id));
+
+        // 2) etkin geçmiş
         foreach (var src in new[] { local, remote })
             foreach (var p in src.Displays.Values)
             {
@@ -145,11 +173,36 @@ public static class GitHubSync
                     m.Displays[p.Key] = t;
                 }
                 foreach (var h in p.History)
-                    if (t.History.All(x => x.Id != h.Id)) t.History.Add(h);
+                {
+                    if (archived.Contains(h.Id)) continue;
+                    var cur = t.History.FirstOrDefault(x => x.Id == h.Id);
+                    if (cur == null) { t.History.Add(h); continue; }
+                    if (Same(cur, h)) continue;
+                    bool iconsSame = LayoutEngine.SameIcons(cur, h) && cur.SpacingW == h.SpacingW && cur.SpacingH == h.SpacingH;
+                    // yerel önce eklendi: uzak taraf yalnızca daha güçlü kaynaksa kazanır
+                    var win = Rank(h.Source) > Rank(cur.Source) ? h : cur;
+                    var lose = ReferenceEquals(win, h) ? cur : h;
+                    if (ReferenceEquals(win, h)) t.History[t.History.IndexOf(cur)] = h;
+                    if (!iconsSame)
+                    {
+                        var copy = System.Text.Json.JsonSerializer.Deserialize<Snapshot>(System.Text.Json.JsonSerializer.Serialize(lose))!;
+                        copy.Id = lose.Id + "-c" + Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(
+                            System.Text.Encoding.UTF8.GetBytes(System.Text.Json.JsonSerializer.Serialize(lose))))[..8].ToLowerInvariant();
+                        if (m.Archive.All(a => a.Snap.Id != copy.Id))
+                            m.Archive.Add(new ArchiveEntry { Key = t.Key, Display = t.Display, Reason = "conflict", ArchivedUtc = DateTime.UtcNow, Snap = copy });
+                    }
+                }
             }
-        foreach (var p in m.Displays.Values) StoreData.Trim(p);
+        foreach (var p in m.Displays.Values.ToList())
+        {
+            if (p.History.Count == 0) { m.Displays.Remove(p.Key); continue; }
+            m.Trim(p);
+        }
         return m;
     }
+
+    static bool Same(Snapshot a, Snapshot b) =>
+        System.Text.Json.JsonSerializer.Serialize(a) == System.Text.Json.JsonSerializer.Serialize(b);
 }
 
 /// <summary>Windows DPAPI: the key is encrypted so only this Windows user can read it.</summary>

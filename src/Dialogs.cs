@@ -1,16 +1,18 @@
 using System.Diagnostics;
+using DDS.Core;
 
 namespace DDS;
 
-/// <summary>One-click update window: shows percent, MB done / total, MB remaining and download speed.</summary>
+/// <summary>Tek tıkla güncelleme penceresi: yüzde · MB inen / toplam · kalan · hız; yama kipinde "yalnızca değişen kısımlar".</summary>
 public sealed class UpdateForm : Form
 {
-    readonly Label lTitle, lInfo;
+    readonly Label lTitle, lInfo, lMode;
     readonly ProgressBar bar;
     readonly Button bCancel;
     readonly CancellationTokenSource cts = new();
     UpdateInfo? info;
-    bool downloading;
+    bool downloading, patch;
+    ProgressTracker? tracker;
 
     public bool Installed { get; private set; }
 
@@ -19,27 +21,24 @@ public sealed class UpdateForm : Form
     public UpdateForm(UpdateInfo? known)
     {
         info = known;
-        Text = Lang.T("upd_title");
+        Text = CoreStrings.T("fc.update");
         Icon = Theme.AppIcon();
         FormBorderStyle = FormBorderStyle.FixedDialog;
         MaximizeBox = MinimizeBox = false;
         ShowInTaskbar = false;
         StartPosition = FormStartPosition.CenterParent;
-        BackColor = Theme.Card;
-        ForeColor = Theme.Text;
-        Font = new Font("Segoe UI", 10f);
-        ClientSize = new Size(D(600), D(190));
-        RightToLeft = Lang.IsRtl ? RightToLeft.Yes : RightToLeft.No;
-        RightToLeftLayout = Lang.IsRtl;
+        Theme.Dialog(this);
+        ClientSize = new Size(D(620), D(220));
 
-        lTitle = new Label { Left = D(24), Top = D(20), Width = D(552), Height = D(28), Font = new Font("Segoe UI Semibold", 12f) };
-        bar = new ProgressBar { Left = D(24), Top = D(60), Width = D(552), Height = D(22), Minimum = 0, Maximum = 1000 };
-        lInfo = new Label { Left = D(24), Top = D(92), Width = D(552), Height = D(26), ForeColor = Theme.Sub };
-        bCancel = Theme.ActionButton(Lang.T("cancel"), Theme.Card2);
+        lTitle = new Label { Left = D(24), Top = D(20), Width = D(572), Height = D(30), Font = Theme.F(12.5f, true), ForeColor = Theme.Text };
+        lMode = new Label { Left = D(24), Top = D(52), Width = D(572), Height = D(22), Font = Theme.F(9.5f, true), ForeColor = Theme.Accent };
+        bar = new ProgressBar { Left = D(24), Top = D(80), Width = D(572), Height = D(10), Minimum = 0, Maximum = 1000 };
+        lInfo = new Label { Left = D(24), Top = D(100), Width = D(572), Height = D(46), ForeColor = Theme.Sub, Font = Theme.F(10f) };
+        bCancel = Theme.ActionButton(CoreStrings.T("fc.cancel"), Btn.Secondary);
         bCancel.AutoSize = false;
-        bCancel.SetBounds(D(456), D(136), D(120), D(36));
+        bCancel.SetBounds(Lang.IsRtl ? D(24) : D(456), D(160), D(140), D(40));
         bCancel.Click += (_, _) => { if (downloading) cts.Cancel(); else Close(); };
-        Controls.AddRange(new Control[] { lTitle, bar, lInfo, bCancel });
+        Controls.AddRange(new Control[] { lTitle, lMode, bar, lInfo, bCancel });
 
         Shown += async (_, _) => await RunAsync();
     }
@@ -50,36 +49,42 @@ public sealed class UpdateForm : Form
         {
             if (info == null)
             {
-                lTitle.Text = Lang.T("upd_checking");
+                lTitle.Text = CoreStrings.T("fc.update.checking");
                 bar.Style = ProgressBarStyle.Marquee;
                 info = await Updater.CheckAsync();
                 bar.Style = ProgressBarStyle.Continuous;
                 if (info == null)
                 {
-                    lTitle.Text = Lang.F("upd_latest", Updater.CurrentText);
+                    lTitle.Text = CoreStrings.T1("fc.update.none", "v", Updater.CurrentText);
                     bar.Value = bar.Maximum;
-                    bCancel.Text = Lang.T("ok");
+                    bCancel.Text = CoreStrings.T("fc.ok");
                     return;
                 }
             }
 
-            lTitle.Text = Lang.F("upd_downloading", info.Version.ToString(3));
-            downloading = true;
-            Progress(0, info.PatchUrl != null ? info.PatchSize : info.Size, 0);
             var ver = info.Version.ToString(3);
-            var file = await Updater.DownloadAsync(info, (d, t, s) =>
+            lTitle.Text = CoreStrings.T1("fc.update.avail", "v", ver) + " — " + CoreStrings.T("fc.update.downloading");
+            if (info.NeedsSetup) lInfo.Text = Lang.T("setup_needed");
+            downloading = true;
+            var file = await Updater.DownloadAsync(info, (d, t) =>
             {
-                if (InvokeRequired) BeginInvoke(() => Progress(d, t, s)); else Progress(d, t, s);
-            }, cts.Token, patch =>
+                if (InvokeRequired) BeginInvoke(() => Progress(d, t)); else Progress(d, t);
+            }, cts.Token, p =>
             {
-                void Set() => lTitle.Text = Lang.F(patch ? "upd_downloading_patch" : "upd_downloading", ver);
+                void Set()
+                {
+                    if (patch && !p) lMode.Text = CoreStrings.T("fc.update.fallback");
+                    else lMode.Text = p ? "⚡ " + CoreStrings.T("fc.update.patchMode") : CoreStrings.T("fc.update.fullMode");
+                    patch = p;
+                    tracker = null;
+                }
                 if (InvokeRequired) BeginInvoke(Set); else Set();
             });
             downloading = false;
 
-            lTitle.Text = Lang.T("upd_installing");
+            lTitle.Text = CoreStrings.T(info.NeedsSetup ? "fc.update.installing" : "fc.update.restarting");
             bCancel.Enabled = false;
-            Updater.ApplyAndRestart(file);
+            Updater.ApplyAndRestart(file, info);
             Installed = true;
             await Task.Delay(700);
             DialogResult = DialogResult.OK;
@@ -93,17 +98,19 @@ public sealed class UpdateForm : Form
         {
             downloading = false;
             bar.Style = ProgressBarStyle.Continuous;
-            lTitle.Text = Lang.F("upd_fail", ex.Message);
-            bCancel.Text = Lang.T("ok");
+            lTitle.Text = CoreStrings.T("fc.error");
+            lInfo.Text = CoreStrings.T1("fc.update.failed", "e", ex is HttpRequestException ? CoreStrings.T("fc.update.offline") : ex.Message);
+            bCancel.Text = CoreStrings.T("fc.ok");
         }
     }
 
-    void Progress(long done, long total, double speed)
+    void Progress(long done, long total)
     {
-        const double MB = 1024.0 * 1024.0;
-        int pct = total > 0 ? (int)Math.Min(100, done * 100 / total) : 0;
+        tracker ??= new ProgressTracker(total);
+        tracker.SetTotal(total);
+        var p = tracker.Update(done, total > 0 && done >= total);
         bar.Value = total > 0 ? (int)Math.Min(bar.Maximum, done * bar.Maximum / total) : 0;
-        lInfo.Text = Lang.F("upd_progress", pct, done / MB, total / MB, Math.Max(0, total - done) / MB, speed / MB);
+        lInfo.Text = p.Format(patch);
     }
 
     protected override void Dispose(bool disposing)
@@ -129,15 +136,11 @@ public sealed class TokenForm : Form
         MaximizeBox = MinimizeBox = false;
         ShowInTaskbar = false;
         StartPosition = FormStartPosition.CenterParent;
-        BackColor = Theme.Card;
-        ForeColor = Theme.Text;
-        Font = new Font("Segoe UI", 10f);
-        ClientSize = new Size(D(580), D(390));
-        RightToLeft = Lang.IsRtl ? RightToLeft.Yes : RightToLeft.No;
-        RightToLeftLayout = Lang.IsRtl;
+        Theme.Dialog(this);
+        ClientSize = new Size(D(580), D(400));
 
         var msg = new Label { Text = Lang.T("sync_msg"), Left = D(24), Top = D(18), Width = D(532), Height = D(205) };
-        var create = Theme.ActionButton(Lang.T("sync_create"), Theme.Accent);
+        var create = Theme.ActionButton(Lang.T("sync_create"), Btn.Primary);
         create.Location = new Point(D(24), D(228));
         create.Click += (_, _) =>
         {
@@ -145,16 +148,16 @@ public sealed class TokenForm : Form
         };
         box = new TextBox
         {
-            Left = D(24), Top = D(284), Width = D(532), BackColor = Theme.Card2, ForeColor = Theme.Text,
+            Left = D(24), Top = D(284), Width = D(532), BackColor = Theme.Input, ForeColor = Theme.Text,
             BorderStyle = BorderStyle.FixedSingle, PlaceholderText = "ghp_...",
         };
-        var ok = Theme.ActionButton(Lang.T("ok"), Theme.Green);
+        var ok = Theme.ActionButton(Lang.T("ok"), Btn.Primary);
         ok.AutoSize = false;
-        ok.SetBounds(D(306), D(334), D(120), D(36));
+        ok.SetBounds(D(296), D(340), D(125), D(40));
         ok.DialogResult = DialogResult.OK;
-        var cancel = Theme.ActionButton(Lang.T("cancel"), Theme.Card2);
+        var cancel = Theme.ActionButton(Lang.T("cancel"), Btn.Secondary);
         cancel.AutoSize = false;
-        cancel.SetBounds(D(436), D(334), D(120), D(36));
+        cancel.SetBounds(D(431), D(340), D(125), D(40));
         cancel.DialogResult = DialogResult.Cancel;
         AcceptButton = ok;
         CancelButton = cancel;

@@ -1,0 +1,26 @@
+[
+ {
+  "in": "Could not find file 'C:\\Users\\Ayşe Yılmaz\\AppData\\Roaming\\DesktopDuzenSabitleyici\\layouts.json'.",
+  "out": "Could not find file '…'."
+ },
+ {
+  "in": "mail ali.veli+x@ornek.com.tr hata 1234567 kez",
+  "out": "mail <email> hata <n> kez"
+ },
+ {
+  "in": "GET https://api.github.com/gists?per_page=100&token=abc failed",
+  "out": "GET https://api.github.com/gists failed"
+ },
+ {
+  "in": "NullReferenceException: Object reference not set to an instance of an object.",
+  "out": "NullReferenceException: Object reference not set to an instance of an object."
+ },
+ {
+  "in": "Path /home/user/x and /Users/bob/y",
+  "out": "Path /home/<user>/x and /Users/<user>/y"
+ },
+ {
+  "in": "Value \"kişisel veri burada\" and 'ok_key' and `x y`",
+  "out": "Value \"…\" and 'ok_key' and `…`"
+ }
+]

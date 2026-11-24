@@ -74,13 +74,30 @@ public sealed class Layout
     public List<IconEntry> Icons { get; set; } = new();
 }
 
+/// <summary>Geçmişten çıkan bir kayıt. v1.1.0'dan beri hiçbir kayıt kalıcı silinmez (ortak eşitleme kuralı):
+/// silinen, sınırı aşan ya da eşitlemede çakışmayı kaybeden kayıt buraya taşınır; Ayarlar → Arşiv'den geri alınabilir.</summary>
+public sealed class ArchiveEntry
+{
+    public string Key { get; set; } = "";
+    public string Display { get; set; } = "";
+    /// <summary>deleted | old | conflict</summary>
+    public string Reason { get; set; } = "deleted";
+    public DateTime ArchivedUtc { get; set; }
+    /// <summary>Geri alındı (yeni kimlikle geçmişe kopyalandı); eşitlemede VEYA ile birleşir, kayıt yine silinmez.</summary>
+    public bool Restored { get; set; }
+    public Snapshot Snap { get; set; } = new();
+}
+
 public sealed class StoreData
 {
     public const int MaxHistory = 25;
+    /// <summary>Arşivde tutulan en çok kayıt; fazlası arsiv-tasma.jsonl dosyasına eklenir (yine silinmez).</summary>
+    public const int MaxArchive = 500;
 
     public int Version { get; set; } = 2;
     public Dictionary<string, Profile> Displays { get; set; } = new();
     public string LastKey { get; set; } = "";
+    public List<ArchiveEntry> Archive { get; set; } = new();
 
     // ---- legacy fields (v1.0.0 / v1.0.1) ----
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] public Layout? Master { get; set; }
@@ -115,9 +132,47 @@ public sealed class StoreData
 
     static int Rank(string s) => s is "manual" or "hotkey" ? 2 : s == "user" ? 1 : 0;
 
-    public static void Trim(Profile p)
+    /// <summary>Geçmişi en yeni MaxHistory kayda indirir; taşan kayıtlar arşive gider (silinmez).</summary>
+    public void Trim(Profile p)
     {
-        p.History = p.History.OrderByDescending(h => h.SavedUtc).Take(MaxHistory).ToList();
+        var sorted = p.History.OrderByDescending(h => h.SavedUtc).ToList();
+        foreach (var old in sorted.Skip(MaxHistory)) ToArchive(p, old, "old");
+        p.History = sorted.Take(MaxHistory).ToList();
+    }
+
+    public void ToArchive(Profile p, Snapshot s, string reason)
+    {
+        if (Archive.Any(a => a.Snap.Id == s.Id)) return;
+        Archive.Add(new ArchiveEntry { Key = p.Key, Display = p.Display, Reason = reason, ArchivedUtc = DateTime.UtcNow, Snap = s });
+    }
+
+    /// <summary>Kaydı geçmişten arşive taşır (kullanıcı "sil" dediğinde).</summary>
+    public bool ArchiveSnapshot(string snapId, string reason = "deleted")
+    {
+        if (Find(snapId) is not { } f) return false;
+        ToArchive(f.p, f.s, reason);
+        f.p.History.Remove(f.s);
+        if (f.p.History.Count == 0) Displays.Remove(f.p.Key);
+        return true;
+    }
+
+    /// <summary>Arşivdeki kaydı yeni kimlikle geçmişe geri koyar; arşiv kaydı "geri alındı" olarak kalır.</summary>
+    public Snapshot? RestoreFromArchive(string snapId)
+    {
+        var a = Archive.FirstOrDefault(x => x.Snap.Id == snapId);
+        if (a == null) return null;
+        var copy = System.Text.Json.JsonSerializer.Deserialize<Snapshot>(System.Text.Json.JsonSerializer.Serialize(a.Snap))!;
+        copy.Id = Guid.NewGuid().ToString("N");
+        if (!Displays.TryGetValue(a.Key, out var p))
+        {
+            p = new Profile { Key = a.Key, Display = a.Display, Monitors = MonitorsFromKey(a.Key) };
+            Displays[a.Key] = p;
+        }
+        p.History.Add(copy);
+        p.History = p.History.OrderByDescending(h => h.SavedUtc).ToList();
+        a.Restored = true;
+        Trim(p);
+        return copy;
     }
 
     public (Profile p, Snapshot s)? Find(string snapId)
@@ -145,7 +200,7 @@ public sealed class StoreData
                 n++;
             }
         }
-        foreach (var p in Displays.Values) Trim(p);
+        foreach (var p in Displays.Values.ToList()) Trim(p);
         Master = null;
         Profiles = null;
         Version = 2;
@@ -188,12 +243,26 @@ public sealed class Settings
     public string? TokenEnc { get; set; }
     public string? GistId { get; set; }
     public bool TrayHintShown { get; set; }
+
+    // ---- ortak çekirdek (v1.1.0) ----
+    /// <summary>Renk şeması: falcon (varsayılan) | klasik (v1.0.x görünümü) | zumrut | gunbatimi | mor | okyanus | grafit | yuksek-kontrast</summary>
+    public string Scheme { get; set; } = "falcon";
+    /// <summary>dark | light | auto</summary>
+    public string Theme { get; set; } = "dark";
+    public double FontScale { get; set; } = 1.0;
+    /// <summary>İlk açılış rehberi tamamlandı.</summary>
+    public bool Onboarded { get; set; }
+    /// <summary>"Neler yeni" penceresinin en son gösterildiği sürüm.</summary>
+    public string? WhatsNewSeen { get; set; }
 }
 
 public static class Storage
 {
     public static readonly string Dir =
+        Environment.GetEnvironmentVariable("DDS_DATA_DIR") is { Length: > 0 } d ? d :
         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "DesktopDuzenSabitleyici");
+    /// <summary>Ekran görüntüsü kipinde hiçbir şey diske yazılmaz.</summary>
+    public static bool ReadOnly { get; set; }
     static readonly string StorePath = Path.Combine(Dir, "layouts.json");
     static readonly string SettingsPath = Path.Combine(Dir, "settings.json");
     static readonly JsonSerializerOptions Opt = new() { WriteIndented = true };
@@ -218,8 +287,32 @@ public static class Storage
         return s;
     }
 
-    public static void SaveStore(StoreData s) => Save(StorePath, s, keepBackup: true);
-    public static Settings LoadSettings() => Load<Settings>(SettingsPath) ?? new Settings();
+    public static void SaveStore(StoreData s)
+    {
+        SpillArchive(s);
+        Save(StorePath, s, keepBackup: true);
+    }
+
+    /// <summary>Arşiv MaxArchive'ı aşarsa en eski arşiv kayıtları arsiv-tasma.jsonl dosyasına eklenir (silinmez).</summary>
+    static void SpillArchive(StoreData s)
+    {
+        if (s.Archive.Count <= StoreData.MaxArchive || ReadOnly) return;
+        try
+        {
+            var spill = s.Archive.OrderBy(a => a.ArchivedUtc).Take(s.Archive.Count - StoreData.MaxArchive).ToList();
+            Directory.CreateDirectory(Dir);
+            File.AppendAllLines(Path.Combine(Dir, "arsiv-tasma.jsonl"), spill.Select(a => JsonSerializer.Serialize(a)));
+            foreach (var a in spill) s.Archive.Remove(a);
+        }
+        catch { }
+    }
+    /// <summary>Bu açılışta ayar dosyası zaten vardı (false = ilk kurulum → ilk açılış rehberi).</summary>
+    public static bool SettingsExisted { get; private set; }
+    public static Settings LoadSettings()
+    {
+        SettingsExisted = File.Exists(SettingsPath);
+        return Load<Settings>(SettingsPath) ?? new Settings();
+    }
     public static void SaveSettings(Settings s) => Save(SettingsPath, s, keepBackup: false);
 
     public static string Serialize(StoreData s) => JsonSerializer.Serialize(s, Opt);
@@ -242,6 +335,7 @@ public static class Storage
 
     static void Save<T>(string path, T obj, bool keepBackup)
     {
+        if (ReadOnly) return;
         try
         {
             Directory.CreateDirectory(Dir);

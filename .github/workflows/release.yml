@@ -1,8 +1,9 @@
-name: build-and-release
-
-# Every push to main builds the app. If the <Version> in the .csproj has no release yet,
-# a new GitHub Release (vX.Y.Z) is published automatically with the exe attached —
-# the app's built-in updater picks it up from there.
+# Desktop Düzen Sabitleyici — test → Windows derlemesi (tek exe + NSIS kurulum + ekran görüntüleri)
+# → GitHub Release (ortak çekirdek reusable-release: latest.json + FCD1 yamaları) → eski istemciler için DDSD1 köprü yamaları.
+# Yayın: src/DesktopDuzenSabitleyici.csproj <Version> + News (src/Core/CoreForms.cs) + release-notes.json, main'e gönder
+# (ya da Actions → release → Run workflow, main). Bu sürüm zaten yayınlanmışsa release atlanır.
+# Entegrasyon / diğer dallarda yalnız test + derleme çalışır.
+name: release
 on:
   push:
     branches: ['**']
@@ -12,76 +13,143 @@ permissions:
   contents: write
 
 jobs:
-  build:
-    runs-on: windows-latest
+  test:
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
       - uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: '8.0.x'
-
-      - name: Read version
-        id: ver
-        shell: pwsh
+        with: { dotnet-version: '8.0.x' }
+      - name: Sürüm tutarlılığı
+        run: node tools/check-version.js
+      - name: Çekirdekten üretilen dosyalar güncel mi (tokenlar, metinler, fikstürler)
+        run: node tools/gen-core.js --check
+      - name: Çekirdek testleri (FCD1, şemalar, ilerleme, çökme, gelen kutusu, eşitleme kuralı, latest.json, 1.0.11 köprüsü)
+        run: dotnet run --project tests/CoreTests -c Release
+      - name: NSIS betiği derleniyor mu
         run: |
-          $v = ([regex]::Match((Get-Content src/DesktopDuzenSabitleyici.csproj -Raw), '<Version>([^<]+)</Version>')).Groups[1].Value
-          "version=$v" >> $env:GITHUB_OUTPUT
-          $exists = $false
-          gh release view "v$v" --repo "${{ github.repository }}" 2>&1 | Out-Null
-          if ($LASTEXITCODE -eq 0) { $exists = $true }
-          "exists=$exists" >> $env:GITHUB_OUTPUT
-          Write-Host "version=$v exists=$exists"
-          exit 0
-        env:
-          GH_TOKEN: ${{ github.token }}
+          sudo apt-get install -y -q nsis >/dev/null
+          head -c 100000 /dev/urandom > /tmp/dummy.exe
+          cd installer && makensis -V2 -DVERSION=0.0.1 -DEXE=/tmp/dummy.exe -DOUTFILE=/tmp/DDS-Setup-test.exe setup.nsi
+          ls -la /tmp/DDS-Setup-test.exe
 
-      - name: Publish single-file exe
+  build:
+    needs: test
+    runs-on: windows-latest
+    outputs:
+      version: ${{ steps.ver.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with: { dotnet-version: '8.0.x' }
+      - id: ver
+        shell: bash
+        run: echo "version=$(sed -n 's/.*<Version>\([^<]*\)<\/Version>.*/\1/p' src/DesktopDuzenSabitleyici.csproj)" >> "$GITHUB_OUTPUT"
+      - name: Tek exe (self-contained, single-file)
         shell: pwsh
         run: >
           dotnet publish src/DesktopDuzenSabitleyici.csproj -c Release -r win-x64 --self-contained true
           -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true
-          -p:EnableCompressionInSingleFile=true -p:DebugType=none -o out
-
-      # Small "changes only" patches from the last 5 releases → the in-app updater downloads
-      # these (~0.1–2 MB) instead of the full exe. Every patch is verified by applying it here.
-      - name: Build update patches
-        if: github.ref == 'refs/heads/main' && steps.ver.outputs.exists != 'True'
+          -p:EnableCompressionInSingleFile=true -p:DebugType=none -p:ContinuousIntegrationBuild=true -o out
+      - name: NSIS kurulum (kullanıcı başına)
         shell: pwsh
-        env:
-          GH_TOKEN: ${{ github.token }}
         run: |
-          New-Item -ItemType Directory -Force patches, prev | Out-Null
-          dotnet build tools/DeltaMaker -c Release -o tools/bin | Out-Null
-          $tags = gh release list --repo "${{ github.repository }}" --limit 5 --json tagName --jq '.[].tagName'
-          foreach ($t in $tags) {
-            $v = $t.TrimStart('v')
-            $old = "prev/$v.exe"
-            gh release download $t --repo "${{ github.repository }}" -p DesktopDuzenSabitleyici.exe -O $old --clobber
-            if ($LASTEXITCODE -ne 0 -or -not (Test-Path $old)) { Write-Host "skip $t"; continue }
-            $patch = "patches/DesktopDuzenSabitleyici-patch-from-$v.bin"
-            tools/bin/DeltaMaker.exe make $old out/DesktopDuzenSabitleyici.exe $patch
-            tools/bin/DeltaMaker.exe apply $old $patch prev/check.exe
-            if ($LASTEXITCODE -ne 0) { Remove-Item $patch; continue }
-            if ((Get-FileHash prev/check.exe).Hash -ne (Get-FileHash out/DesktopDuzenSabitleyici.exe).Hash) { Remove-Item $patch; continue }
-            # a patch bigger than 70% of the full file is not worth it
-            if ((Get-Item $patch).Length -gt 0.7 * (Get-Item out/DesktopDuzenSabitleyici.exe).Length) { Remove-Item $patch }
+          $v = "${{ steps.ver.outputs.version }}"
+          & "${env:ProgramFiles(x86)}\NSIS\makensis.exe" -V2 "/DVERSION=$v" "/DEXE=..\out\DesktopDuzenSabitleyici.exe" "/DOUTFILE=..\out\DesktopDuzenSabitleyici-Setup-$v.exe" installer\setup.nsi
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+      - name: Açılış testi + ekran görüntüleri
+        shell: pwsh
+        timeout-minutes: 8
+        run: |
+          New-Item -ItemType Directory -Force screens | Out-Null
+          $runs = @(
+            @('tr-falcon-dark',  '--lang','tr','--scheme','falcon','--theme','dark','--dialog','onboarding'),
+            @('ar-falcon-light', '--lang','ar','--scheme','falcon','--theme','light','--dialog','whatsnew'),
+            @('tr-klasik',       '--lang','tr','--scheme','klasik','--theme','dark','--dialog','contact'),
+            @('en-zumrut-light', '--lang','en','--scheme','zumrut','--theme','light','--dialog','archive')
+          )
+          $fail = 0
+          foreach ($r in $runs) {
+            $a = @('--screenshot', "screens\$($r[0]).png") + $r[1..($r.Length-1)]
+            $p = Start-Process -FilePath out\DesktopDuzenSabitleyici.exe -ArgumentList $a -PassThru
+            if (-not $p.WaitForExit(90000)) { $p.Kill(); Write-Host "::error::$($r[0]) zaman aşımı"; $fail++ ; continue }
+            if ($p.ExitCode -ne 0 -or -not (Test-Path "screens\$($r[0]).png")) { Write-Host "::error::$($r[0]) açılamadı (çıkış $($p.ExitCode))"; $fail++ }
           }
-          Get-ChildItem patches | Format-Table Name, Length
-
+          Get-ChildItem screens | Format-Table Name, Length
+          if ($fail -gt 0) { exit 1 }
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ekran-goruntuleri
+          path: screens/
+          retention-days: 7
+      - name: Yayınlanacak dosyaları topla
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir release
+          cp out/DesktopDuzenSabitleyici.exe release/
+          cp out/DesktopDuzenSabitleyici-Setup-*.exe release/
+          ls -la release
+          sha256sum release/*
       - uses: actions/upload-artifact@v4
         with:
-          name: DesktopDuzenSabitleyici-v${{ steps.ver.outputs.version }}
-          path: out/DesktopDuzenSabitleyici.exe
+          name: release-win
+          path: release/
+          retention-days: 5
 
-      - name: Publish release
-        if: github.ref == 'refs/heads/main' && steps.ver.outputs.exists != 'True'
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: v${{ steps.ver.outputs.version }}
-          name: Desktop Düzen Sabitleyici v${{ steps.ver.outputs.version }}
-          files: |
-            out/DesktopDuzenSabitleyici.exe
-            patches/*.bin
-          generate_release_notes: true
-          make_latest: true
+  release:
+    needs: [test, build]
+    if: github.ref == 'refs/heads/main'
+    permissions:
+      contents: write
+    uses: departures-mil/ortak-cekirdek/.github/workflows/reusable-release.yml@main
+    with:
+      app_id: desktop-duzen-sabitleyici
+      version: ${{ needs.build.outputs.version }}
+      file_prefix: DesktopDuzenSabitleyici
+      release_title: Desktop Düzen Sabitleyici v${{ needs.build.outputs.version }}
+      # win-exe asset'i ESKİ ADIYLA yayınlanır: 1.0.x istemcileri releases/latest'te "DesktopDuzenSabitleyici.exe" arar (köprü)
+      files: |
+        win-exe=DesktopDuzenSabitleyici.exe=DesktopDuzenSabitleyici.exe
+        win-setup=DesktopDuzenSabitleyici-Setup-*.exe=DesktopDuzenSabitleyici-Setup-{version}.exe
+      # latest.json'u olmayan 1.0.x release'lerinden de FCD1 yaması üretilsin
+      legacy_assets: |
+        win-exe=DesktopDuzenSabitleyici.exe
+      notes_json: release-notes.json
+      core_ref: main
+
+  # KÖPRÜ: 1.0.x istemcileri yalnızca DDSD1 biçimindeki "DesktopDuzenSabitleyici-patch-from-X.Y.Z.bin" yamasını tanır.
+  # Bunları da üretip doğrulayarak ekle (yoksa 1.0.x tam exe'yi indirir — o da çalışır, yalnızca daha büyük).
+  legacy-patches:
+    needs: [build, release]
+    if: needs.release.outputs.released == 'true'
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPO: ${{ github.repository }}
+      V: ${{ needs.build.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with: { dotnet-version: '8.0.x' }
+      - uses: actions/download-artifact@v4
+        with: { name: release-win, path: new }
+      - name: DDSD1 köprü yamaları (son 5 sürümden)
+        run: |
+          set -uo pipefail
+          dotnet build tools/DeltaMaker -c Release -o tools/bin >/dev/null
+          mkdir -p prev patches
+          NEW=new/DesktopDuzenSabitleyici.exe
+          for t in $(gh api "repos/$REPO/releases?per_page=10" --jq '.[] | select(.draft==false and .prerelease==false) | .tag_name' | grep -v "^v$V\$" | head -5); do
+            v="${t#v}"
+            if ! gh release download "$t" --repo "$REPO" -p DesktopDuzenSabitleyici.exe -O "prev/$v.exe" --clobber; then echo "atla $t"; continue; fi
+            p="patches/DesktopDuzenSabitleyici-patch-from-$v.bin"
+            dotnet tools/bin/DeltaMaker.dll make "prev/$v.exe" "$NEW" "$p" || { rm -f "$p"; continue; }
+            dotnet tools/bin/DeltaMaker.dll apply "prev/$v.exe" "$p" prev/check.exe || { rm -f "$p"; continue; }
+            if [ "$(sha256sum < prev/check.exe)" != "$(sha256sum < "$NEW")" ]; then echo "doğrulanamadı $v"; rm -f "$p"; continue; fi
+            if [ "$(stat -c%s "$p")" -gt "$(( $(stat -c%s "$NEW") * 7 / 10 ))" ]; then echo "büyük $v"; rm -f "$p"; continue; fi
+          done
+          ls -la patches
+          if ls patches/*.bin >/dev/null 2>&1; then gh release upload "v$V" --repo "$REPO" patches/*.bin --clobber; fi

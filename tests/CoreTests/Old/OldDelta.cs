@@ -1,7 +1,7 @@
 using System.IO.Compression;
 using System.Security.Cryptography;
 
-namespace DDS;
+namespace OldDDS;
 
 /// <summary>
 /// Binary delta (patch) between two versions of the exe.

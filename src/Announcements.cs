@@ -23,7 +23,7 @@ public sealed class Announcements
     };
 
     readonly Form owner;
-    readonly Button bell;
+    Button bell;
     readonly Action? update;
     readonly System.Windows.Forms.Timer timer = new() { Interval = 30 * 60 * 1000 };
     List<JsonObject> list = new();
@@ -38,6 +38,14 @@ public sealed class Announcements
         try { if (File.Exists(SeenPath)) seen = JsonSerializer.Deserialize<List<string>>(File.ReadAllText(SeenPath)) ?? new(); } catch { }
         try { if (File.Exists(CachePath)) Apply(JsonNode.Parse(File.ReadAllText(CachePath)) as JsonArray, false); } catch { }
         timer.Tick += async (_, _) => await RefreshAsync();
+    }
+
+    /// <summary>Görünüm değişince ana pencere yeniden kurulur; yeni 🔔 düğmesine bağlan.</summary>
+    public void Rebind(Button newBell)
+    {
+        bell = newBell;
+        bell.Click += (_, _) => ShowList();
+        UpdateBell();
     }
 
     public async Task StartAsync()
@@ -118,7 +126,7 @@ public sealed class Announcements
     {
         int n = list.Count(d => !seen.Contains(d["id"]!.ToString()));
         bell.Text = n > 0 ? $"🔔{n}" : "🔔";
-        bell.ForeColor = n > 0 ? Color.FromArgb(255, 210, 74) : Theme.Text;
+        bell.ForeColor = n > 0 ? Theme.Warn : Theme.Text;
         bell.Visible = list.Count > 0;
     }
 
@@ -147,36 +155,39 @@ public sealed class Announcements
         using var f = new Form
         {
             Text = "🔔 " + T("title"), StartPosition = FormStartPosition.CenterScreen, TopMost = true,
-            Width = 560, Height = 440, BackColor = Theme.Card, ForeColor = Theme.Text, MinimizeBox = false, MaximizeBox = false,
+            Width = 560, Height = 440, MinimizeBox = false, MaximizeBox = false,
             RightToLeft = rtl ? RightToLeft.Yes : RightToLeft.No, RightToLeftLayout = rtl, ShowIcon = false,
         };
+        Theme.Dialog(f);
         var box = new RichTextBox
         {
             Dock = DockStyle.Fill, ReadOnly = true, BorderStyle = BorderStyle.None, BackColor = Theme.Card, ForeColor = Theme.Text,
-            Font = new Font("Segoe UI", 10.5f), DetectUrls = true, RightToLeft = rtl ? RightToLeft.Yes : RightToLeft.No,
+            Font = Theme.F(10.5f), DetectUrls = true, RightToLeft = rtl ? RightToLeft.Yes : RightToLeft.No,
         };
         box.LinkClicked += (_, e) => { try { Process.Start(new ProcessStartInfo(e.LinkText!) { UseShellExecute = true }); } catch { } };
         if (items.Count == 0) box.AppendText(T("none"));
         foreach (var d in items)
         {
-            box.SelectionFont = new Font("Segoe UI", 12.5f, FontStyle.Bold);
+            box.SelectionFont = Theme.F(12.5f, true);
             box.AppendText((d["onem"]?.ToString() == "onemli" ? "[" + T("imp") + "] " : "") + Pick(d["baslik"]) + "\n");
-            box.SelectionFont = new Font("Segoe UI", 9f);
-            box.SelectionColor = Color.Gray;
+            box.SelectionFont = Theme.F(9f);
+            box.SelectionColor = Theme.Sub;
             box.AppendText((DateTime.TryParse(d["tarih"]?.ToString(), out var t) ? t.ToString("dd.MM.yyyy") : "") + "\n");
             box.SelectionColor = Theme.Text;
-            box.SelectionFont = new Font("Segoe UI", 10.5f);
+            box.SelectionFont = Theme.F(10.5f);
             box.AppendText(Pick(d["metin"]) + "\n");
             if (d["link"] is JsonNode lk) box.AppendText(lk + "\n");
             box.AppendText("\n");
         }
         var bar = new FlowLayoutPanel { Dock = DockStyle.Bottom, Height = 48, FlowDirection = rtl ? FlowDirection.LeftToRight : FlowDirection.RightToLeft, Padding = new Padding(8), BackColor = Theme.Card };
-        var ok = new Button { Text = items.Count > 1 ? T("close") : T("ok"), AutoSize = true, FlatStyle = FlatStyle.Flat, ForeColor = Theme.Text };
+        var ok = Theme.ActionButton(items.Count > 1 ? T("close") : T("ok"), Btn.Secondary);
+        ok.Margin = new Padding(0, 0, 8, 0);
         ok.Click += (_, _) => f.Close();
         bar.Controls.Add(ok);
         if (withUpdate && update != null)
         {
-            var up = new Button { Text = T("upd"), AutoSize = true, FlatStyle = FlatStyle.Flat, ForeColor = Theme.Text };
+            var up = Theme.ActionButton(T("upd"), Btn.Primary);
+            up.Margin = new Padding(0, 0, 8, 0);
             up.Click += (_, _) => { f.Close(); update(); };
             bar.Controls.Add(up);
         }
