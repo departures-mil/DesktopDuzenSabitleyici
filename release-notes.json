@@ -1,5 +1,5 @@
 {
-  "tr": "- Arapça: Ayarlar'daki Asistan Agent düğmesi artık çevrili",
-  "en": "- Arabic: the Assistant Agent button in Settings is now translated",
-  "ar": "- العربية: أصبح زر الوكيل المساعد في الإعدادات مترجماً"
+  "tr": "- Güncellemeler artık tamamen kendiliğinden: yeni sürüm bulununca arka planda indirilir, pencere açmadan kurulur ve program birkaç saniyede yeniden açılır. Kurulum gereken güncellemeler de sessiz yapılır. Kayıtlar korunur.",
+  "en": "- Updates are now fully automatic: when a new version is found it downloads in the background, installs without any window and the program reopens within seconds. Updates that need the installer also run silently. Records are kept.",
+  "ar": "- أصبحت التحديثات تلقائية بالكامل: عند العثور على إصدار جديد يُنزَّل في الخلفية ويُثبَّت دون أي نافذة ويُعاد فتح البرنامج خلال ثوانٍ. التحديثات التي تحتاج إلى برنامج التثبيت تتم بصمت أيضاً. تبقى السجلات محفوظة."
 }

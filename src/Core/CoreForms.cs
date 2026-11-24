@@ -7,6 +7,10 @@ public static class News
 {
     public static readonly (string v, string tr, string en, string ar)[] Items =
     {
+        ("1.1.2",
+         "Güncellemeler artık tamamen kendiliğinden: yeni sürüm bulununca arka planda indirilir, pencere açmadan kurulur ve program birkaç saniyede yeniden açılır. Kurulum gereken güncellemeler de sessiz yapılır. Kayıtlar korunur.",
+         "Updates are now fully automatic: when a new version is found it downloads in the background, installs without any window and the program reopens within seconds. Updates that need the installer also run silently. Records are kept.",
+         "أصبحت التحديثات تلقائية بالكامل: عند العثور على إصدار جديد يُنزَّل في الخلفية ويُثبَّت دون أي نافذة ويُعاد فتح البرنامج خلال ثوانٍ. التحديثات التي تحتاج إلى برنامج التثبيت تتم بصمت أيضاً. تبقى السجلات محفوظة."),
         ("1.1.1",
          "Arapça: Ayarlar'daki Asistan Agent düğmesi artık çevrili",
          "Arabic: the Assistant Agent button in Settings is now translated",
