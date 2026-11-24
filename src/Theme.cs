@@ -83,16 +83,57 @@ public static class Theme
         catch { }
     }
 
-    public static TextBox Box(bool multi = false) => new()
+    public static TextBox Box(bool multi = false)
     {
-        Multiline = multi, ScrollBars = multi ? ScrollBars.Vertical : ScrollBars.None,
-        BackColor = Input, ForeColor = Text, BorderStyle = BorderStyle.FixedSingle,
-    };
+        var t = new TextBox
+        {
+            Multiline = multi, ScrollBars = multi ? ScrollBars.Vertical : ScrollBars.None,
+            BackColor = Input, ForeColor = Text, BorderStyle = BorderStyle.FixedSingle,
+        };
+        DarkScroll(t);
+        return t;
+    }
 
-    public static ComboBox Combo() => new()
+    /// <summary>Açılır liste: kendi çizimi (Windows'un beyaz kutusu yerine Falcon renkleri).</summary>
+    public static ComboBox Combo()
     {
-        DropDownStyle = ComboBoxStyle.DropDownList, FlatStyle = FlatStyle.Flat, BackColor = Input, ForeColor = Text,
-    };
+        var c = new ComboBox
+        {
+            DropDownStyle = ComboBoxStyle.DropDownList, FlatStyle = FlatStyle.Flat, BackColor = Input, ForeColor = Text,
+            DrawMode = DrawMode.OwnerDrawFixed,
+        };
+        c.DrawItem += (_, e) =>
+        {
+            if (e.Index < 0) return;
+            bool sel = (e.State & DrawItemState.Selected) != 0 && (e.State & DrawItemState.ComboBoxEdit) == 0;
+            using (var b = new SolidBrush(sel ? Look.Tok("active-1", Input) : Input)) e.Graphics.FillRectangle(b, e.Bounds);
+            var r = e.Bounds; r.Inflate(-4, 0);
+            TextRenderer.DrawText(e.Graphics, c.GetItemText(c.Items[e.Index]), c.Font, r, Text,
+                TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis | (Lang.IsRtl ? TextFormatFlags.Right | TextFormatFlags.RightToLeft : TextFormatFlags.Left));
+        };
+        c.HandleCreated += (_, _) => { if (Look.IsDark) try { Native.Win32.SetWindowTheme(c.Handle, "DarkMode_CFD", null); } catch { } };
+        return c;
+    }
+
+    /// <summary>Koyu temada Windows kaydırma çubuklarını / liste başlıklarını koyu çizdir (Windows 10 1809+).</summary>
+    public static void DarkScroll(Control c)
+    {
+        void Apply()
+        {
+            if (!Look.IsDark) return;
+            try
+            {
+                Native.Win32.SetWindowTheme(c.Handle, "DarkMode_Explorer", null);
+                if (c is ListView lv)
+                {
+                    var hdr = Native.Win32.SendMessage(lv.Handle, 0x101F, IntPtr.Zero, IntPtr.Zero); // LVM_GETHEADER
+                    if (hdr != IntPtr.Zero) Native.Win32.SetWindowTheme(hdr, "DarkMode_ItemsView", null);
+                }
+            }
+            catch { }
+        }
+        if (c.IsHandleCreated) Apply(); else c.HandleCreated += (_, _) => Apply();
+    }
 
     public static GraphicsPath Round(RectangleF r, float rad)
     {

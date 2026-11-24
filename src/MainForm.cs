@@ -55,6 +55,7 @@ public sealed class MainForm : Form
     Button bDel = null!, bRestoreSel = null!, bPreviewSel = null!;
     ListBox lb = null!;
     ContextMenuStrip trayMenu = null!;
+    FlowLayoutPanel statusFlow = null!, settingsFlow = null!;
     ToolStripMenuItem miOpen = null!, miSave = null!, miRestore = null!, miExit = null!;
 
     int D(int v) => (int)Math.Round(v * DeviceDpi / 96.0);
@@ -345,6 +346,7 @@ public sealed class MainForm : Form
         {
             FlowDirection = FlowDirection.TopDown, WrapContents = false, AutoScroll = true, BackColor = Theme.Card,
         };
+        Theme.DarkScroll(f);
         f.SizeChanged += (_, _) =>
         {
             foreach (Control c in f.Controls)
@@ -361,11 +363,6 @@ public sealed class MainForm : Form
 
         // ---- üst çubuk: sağ üstte (soldan sağa) 🔔 · Eşitle · Güncelle · tema · dil | Küçült · Orta · Tam ekran · Kapat ----
         titleBar = new Panel { Dock = DockStyle.Top, Height = D(46), BackColor = Theme.TitleBg };
-        titleBar.Paint += (_, e) =>
-        {
-            using var pen = new Pen(Look.Tok("border", Theme.TitleBg));
-            e.Graphics.DrawLine(pen, 0, titleBar.Height - 1, titleBar.Width, titleBar.Height - 1);
-        };
         var btns = new FlowLayoutPanel
         {
             Dock = DockStyle.Right, FlowDirection = FlowDirection.RightToLeft, WrapContents = false,
@@ -405,6 +402,7 @@ public sealed class MainForm : Form
         titleBar.Controls.Add(btns);
         titleBar.Controls.Add(logo);
         titleBar.Controls.Add(titleLbl);
+        titleBar.Controls.Add(new Panel { Dock = DockStyle.Bottom, Height = 1, BackColor = Look.Tok("border", Theme.TitleBg) }); // son eklenen önce yerleşir: tam genişlik
         titleBar.MouseDown += DragWindow;
         titleLbl.MouseDown += DragWindow;
         logo.MouseDown += DragWindow;
@@ -447,6 +445,8 @@ public sealed class MainForm : Form
             IntegralHeight = false, Margin = new Padding(0, D(4), 0, 0), Font = Theme.F(9.5f),
             HorizontalScrollbar = true,
         };
+        Theme.DarkScroll(lb);
+        statusFlow = fs;
         fs.Controls.AddRange(new Control[] { hStatus, lStatus, lHow, lScreensH, lScreens, lIcons, lSave, lRestore, actions, hLog, lb });
         fs.SizeChanged += (_, _) => actions.MaximumSize = new Size(Math.Max(100, fs.ClientSize.Width - D(12)), 0);
         // the activity list takes whatever room is left at the bottom of the status card
@@ -459,6 +459,7 @@ public sealed class MainForm : Form
 
         // settings card — Ayarlar: koruma · Görünüm · Arşiv · Kullanım Limitleri · Otomatik hata raporu · Hakkında · Asistan Agent · Admin ile iletişim (EN SON)
         var fset = Flow();
+        settingsFlow = fset;
         hSettings = L(hFont);
         lMode = Section(sFont);
         lMode.Margin = new Padding(0, D(8), 0, D(2));
@@ -580,8 +581,20 @@ public sealed class MainForm : Form
                 TextFormatFlags.VerticalCenter | TextFormatFlags.Left | TextFormatFlags.EndEllipsis |
                 (Lang.IsRtl ? TextFormatFlags.RightToLeft | TextFormatFlags.Right : 0));
         };
-        lv.DrawItem += (_, e) => e.DrawDefault = true;
-        lv.DrawSubItem += (_, e) => e.DrawDefault = true;
+        lv.DrawItem += (_, _) => { };
+        lv.DrawSubItem += (_, e) =>
+        {
+            if (e.Item == null) return;
+            var bg = e.Item.Selected ? Look.Tok("active-1", Theme.Input) : Theme.Input;
+            using (var b = new SolidBrush(bg)) e.Graphics.FillRectangle(b, e.Bounds);
+            if (e.Item.Selected && e.ColumnIndex == 0)
+                using (var a = new SolidBrush(Theme.Accent)) e.Graphics.FillRectangle(a, Lang.IsRtl ? e.Bounds.Right - D(3) : e.Bounds.Left, e.Bounds.Top, D(3), e.Bounds.Height);
+            var r = e.Bounds; r.Inflate(-D(6), 0);
+            TextRenderer.DrawText(e.Graphics, e.SubItem?.Text, lv.Font, r, e.Item.ForeColor,
+                TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis | TextFormatFlags.SingleLine |
+                (Lang.IsRtl ? TextFormatFlags.RightToLeft | TextFormatFlags.Right : TextFormatFlags.Left));
+        };
+        Theme.DarkScroll(lv);
         lv.Resize += (_, _) => FitColumns();
         bDel = Theme.ActionButton("", Btn.Danger);
         bDel.Click += (_, _) => DeleteSelected();
@@ -716,6 +729,7 @@ public sealed class MainForm : Form
         foreach (Control card in content.Controls)
             foreach (Control inner in card.Controls)
                 if (inner is FlowLayoutPanel f) f.PerformLayout();
+        if (IsHandleCreated) BeginInvoke(() => { statusFlow.AutoScrollPosition = Point.Empty; settingsFlow.AutoScrollPosition = Point.Empty; });
     }
 
     static string When(DateTime? t) =>
@@ -1123,6 +1137,19 @@ public sealed class MainForm : Form
             DrawToBitmap(bmp, new Rectangle(0, 0, Width, Height));
             bmp.Save(file, System.Drawing.Imaging.ImageFormat.Png);
         }
+        // Ayarlar kartının aşağısı (Görünüm, Arşiv, Kullanım Limitleri, hata raporu, Hakkında, iletişim)
+        var card = settingsFlow.Parent!;
+        int view = settingsFlow.ClientSize.Height, total = settingsFlow.DisplayRectangle.Height;
+        for (int i = 1, y = (int)(view * 0.85); y < total && i <= 4; i++, y += (int)(view * 0.85))
+        {
+            settingsFlow.AutoScrollPosition = new Point(0, y);
+            settingsFlow.PerformLayout();
+            await Task.Delay(300);
+            using var cb = new Bitmap(card.Width, card.Height);
+            card.DrawToBitmap(cb, new Rectangle(0, 0, card.Width, card.Height));
+            cb.Save(Path.ChangeExtension(file, null) + "-ayarlar" + i + ".png", System.Drawing.Imaging.ImageFormat.Png);
+        }
+        settingsFlow.AutoScrollPosition = Point.Empty;
         if (dialog == null) return;
         Form f = dialog switch
         {
