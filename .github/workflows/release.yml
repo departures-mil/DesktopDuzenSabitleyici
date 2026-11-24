@@ -56,7 +56,10 @@ jobs:
         shell: pwsh
         run: |
           $v = "${{ steps.ver.outputs.version }}"
-          & "${env:ProgramFiles(x86)}\NSIS\makensis.exe" -V2 "/DVERSION=$v" "/DEXE=..\out\DesktopDuzenSabitleyici.exe" "/DOUTFILE=..\out\DesktopDuzenSabitleyici-Setup-$v.exe" installer\setup.nsi
+          $mk = "${env:ProgramFiles(x86)}\NSIS\makensis.exe"
+          if (-not (Test-Path $mk)) { choco install nsis -y --no-progress | Out-Null }
+          if (-not (Test-Path $mk)) { $mk = (Get-Command makensis.exe -ErrorAction Stop).Source }
+          & $mk -V2 "/DVERSION=$v" "/DEXE=..\out\DesktopDuzenSabitleyici.exe" "/DOUTFILE=..\out\DesktopDuzenSabitleyici-Setup-$v.exe" installer\setup.nsi
           if ($LASTEXITCODE -ne 0) { exit 1 }
       - name: Açılış testi + ekran görüntüleri
         shell: pwsh
