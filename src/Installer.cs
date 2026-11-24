@@ -5,7 +5,12 @@ using Microsoft.Win32;
 
 namespace DDS;
 
-/// <summary>Puts the app in a fixed place (no admin needed), creates shortcuts and handles "start with Windows".</summary>
+/// <summary>
+/// Puts the app in a fixed place (no admin needed), creates shortcuts and handles "start with Windows".
+/// v1.1.0'dan beri asıl kurulum NSIS ile (installer/setup.nsi, kullanıcı başına, aynı klasör:
+/// %LOCALAPPDATA%\Programs\DesktopDuzenSabitleyici). Tek exe'yi doğrudan çalıştıranlar için kendini kurma korunur.
+/// Veri her zaman %APPDATA%\DesktopDuzenSabitleyici (değişmez).
+/// </summary>
 public static class Installer
 {
     public static readonly string InstallDir =
@@ -56,6 +61,19 @@ public static class Installer
             link.SetDescription("Desktop Düzen Sabitleyici");
             ((IPersistFile)obj).Save(lnk, true);
             System.Runtime.InteropServices.Marshal.ReleaseComObject(obj);
+        }
+        catch { }
+    }
+
+    const string UninstallKey = @"Software\Microsoft\Windows\CurrentVersion\Uninstall\DesktopDuzenSabitleyici";
+
+    /// <summary>Uygulama içinden güncellenince "Uygulamalar" listesindeki sürüm de güncel kalsın (NSIS kaydı varsa).</summary>
+    public static void TouchUninstallEntry()
+    {
+        try
+        {
+            using var k = Registry.CurrentUser.OpenSubKey(UninstallKey, true);
+            if (k != null && (k.GetValue("DisplayVersion") as string) != Updater.CurrentText) k.SetValue("DisplayVersion", Updater.CurrentText);
         }
         catch { }
     }

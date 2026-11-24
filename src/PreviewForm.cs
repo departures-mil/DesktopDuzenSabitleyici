@@ -1,3 +1,4 @@
+using DDS.Core;
 using System.Drawing.Drawing2D;
 using System.Runtime.InteropServices;
 
@@ -35,7 +36,8 @@ public sealed class PreviewForm : Form
         Icon = Theme.AppIcon();
         BackColor = Theme.Bg;
         ForeColor = Theme.Text;
-        Font = new Font("Segoe UI", 10f);
+        Font = Theme.F(10f);
+        HandleCreated += (_, _) => Theme.DarkTitle(this);
         ShowInTaskbar = false;
         KeyPreview = true;
         StartPosition = FormStartPosition.Manual;
@@ -45,13 +47,13 @@ public sealed class PreviewForm : Form
         // ---- header: which screen this record belongs to ----
         header = new Panel { Dock = DockStyle.Top, BackColor = Theme.Card, Padding = new Padding(D(20), D(14), D(20), D(10)), AutoSize = true };
         var hf = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.TopDown, WrapContents = false, AutoSize = true, BackColor = Theme.Card };
-        lTitle = new Label { AutoSize = true, Font = new Font("Segoe UI Semibold", 15f), ForeColor = Theme.Text, Margin = new Padding(0, 0, 0, 4) };
-        lBadge = new Label { AutoSize = true, Font = new Font("Segoe UI Semibold", 10.5f), Padding = new Padding(D(10), D(3), D(10), D(3)), Margin = new Padding(0, 2, 0, 6) };
+        lTitle = new Label { AutoSize = true, Font = Theme.F(15f, true), ForeColor = Theme.Text, Margin = new Padding(0, 0, 0, 4) };
+        lBadge = new Label { AutoSize = true, Font = Theme.F(10.5f, true), Padding = new Padding(D(10), D(3), D(10), D(3)), Margin = new Padding(0, 2, 0, 6) };
         lInfo = new Label { AutoSize = true, ForeColor = Theme.Sub, Margin = new Padding(0, 0, 0, 4) };
-        lLegend = new Label { AutoSize = true, ForeColor = Theme.Text, Font = new Font("Segoe UI", 9.5f), Margin = new Padding(0, 0, 0, 6) };
+        lLegend = new Label { AutoSize = true, ForeColor = Theme.Text, Font = Theme.F(9.5f), Margin = new Padding(0, 0, 0, 6) };
         var modes = new FlowLayoutPanel { AutoSize = true, WrapContents = false, BackColor = Theme.Card, Margin = Padding.Empty };
-        bSaved = Theme.ActionButton("", Theme.Accent);
-        bHere = Theme.ActionButton("", Theme.Card2);
+        bSaved = Theme.ActionButton("", Btn.Primary);
+        bHere = Theme.ActionButton("", Btn.Secondary);
         bSaved.Click += (_, _) => { showOnCurrent = false; ShowRecord(); };
         bHere.Click += (_, _) => { showOnCurrent = true; ShowRecord(); };
         modes.Controls.AddRange(new Control[] { bSaved, bHere });
@@ -62,14 +64,14 @@ public sealed class PreviewForm : Form
         footer = new Panel { Dock = DockStyle.Bottom, Height = D(64), BackColor = Theme.Card, Padding = new Padding(D(16), D(6), D(16), D(6)) };
         var left = new FlowLayoutPanel { Dock = DockStyle.Left, AutoSize = true, WrapContents = false, BackColor = Theme.Card };
         var right = new FlowLayoutPanel { Dock = DockStyle.Right, AutoSize = true, WrapContents = false, BackColor = Theme.Card };
-        bPrev = Theme.ActionButton("", Theme.Card2);
-        bNext = Theme.ActionButton("", Theme.Card2);
+        bPrev = Theme.ActionButton("", Btn.Secondary);
+        bNext = Theme.ActionButton("", Btn.Secondary);
         bPrev.Click += (_, _) => Step(-1);
         bNext.Click += (_, _) => Step(+1);
-        lHint = new Label { AutoSize = true, ForeColor = Theme.Sub, Font = new Font("Segoe UI", 9f), Margin = new Padding(D(6), D(16), 0, 0) };
+        lHint = new Label { AutoSize = true, ForeColor = Theme.Sub, Font = Theme.F(9f), Margin = new Padding(D(6), D(16), 0, 0) };
         left.Controls.AddRange(new Control[] { bPrev, bNext, lHint });
-        bRestore = Theme.ActionButton("", Theme.Green);
-        bClose = Theme.ActionButton("", Theme.Card2);
+        bRestore = Theme.ActionButton("", Btn.Ok);
+        bClose = Theme.ActionButton("", Btn.Secondary);
         bRestore.Click += (_, _) => { if (CurrentId is string id) { restore(id); Close(); } };
         bClose.Click += (_, _) => Close();
         right.Controls.AddRange(new Control[] { bRestore, bClose });
@@ -158,20 +160,20 @@ public sealed class PreviewForm : Form
         if (isCurrent)
         {
             lBadge.Text = "✔  " + Lang.T("pv_is_current");
-            lBadge.BackColor = Color.FromArgb(20, 70, 45);
-            lBadge.ForeColor = Theme.Green;
+            lBadge.BackColor = Look.Tok("ok-soft", Theme.Bg);
+            lBadge.ForeColor = Look.Tok("ok-text", Theme.Bg);
         }
         else if (sameScreens)
         {
             lBadge.Text = "●  " + Lang.T("pv_same_screens");
-            lBadge.BackColor = Color.FromArgb(25, 50, 90);
-            lBadge.ForeColor = Color.FromArgb(147, 197, 253);
+            lBadge.BackColor = Look.Tok("accent-soft", Theme.Bg);
+            lBadge.ForeColor = Look.Tok("badge-text", Theme.Bg);
         }
         else
         {
             lBadge.Text = "⚠  " + Lang.T("pv_other");
-            lBadge.BackColor = Color.FromArgb(80, 55, 15);
-            lBadge.ForeColor = Color.FromArgb(251, 191, 36);
+            lBadge.BackColor = Look.Tok("warn-soft", Theme.Bg);
+            lBadge.ForeColor = Look.Tok("warn-text", Theme.Bg);
         }
 
         int pos = p.History.IndexOf(s) + 1;
@@ -194,8 +196,9 @@ public sealed class PreviewForm : Form
         // The "on this screen" view only makes sense for a record of another display setup.
         bHere.Visible = !isCurrent;
         if (isCurrent) showOnCurrent = false;
-        bSaved.BackColor = showOnCurrent ? Theme.Card2 : Theme.Accent;
-        bHere.BackColor = showOnCurrent ? Theme.Accent : Theme.Card2;
+        ((FcButton)bSaved).Kind = showOnCurrent ? Btn.Secondary : Btn.Primary;
+        ((FcButton)bHere).Kind = showOnCurrent ? Btn.Primary : Btn.Secondary;
+        bSaved.Invalidate(); bHere.Invalidate();
         bSaved.FlatAppearance.MouseOverBackColor = ControlPaint.Light(bSaved.BackColor, 0.25f);
         bHere.FlatAppearance.MouseOverBackColor = ControlPaint.Light(bHere.BackColor, 0.25f);
         canvas.ShowOnCurrent = showOnCurrent;

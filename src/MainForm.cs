@@ -1,13 +1,17 @@
 using System.Diagnostics;
+using DDS.Core;
 using DDS.Native;
+using Microsoft.Win32;
 using WinTimer = System.Windows.Forms.Timer;
 
 namespace DDS;
 
 public sealed class MainForm : Form
 {
-    readonly Settings settings = Storage.LoadSettings();
-    readonly StoreData store = Storage.LoadStore();
+    readonly Settings settings;
+    readonly StoreData store;
+    /// <summary>Ekran görüntüsü kipi (CI): koruma, tepsi, güncelleme, agent çalışmaz; diske yazılmaz.</summary>
+    readonly bool shot;
     readonly Guardian guard;
     readonly NotifyIcon tray;
     readonly ToolTip tips = new() { InitialDelay = 300 };
@@ -15,19 +19,28 @@ public sealed class MainForm : Form
     readonly List<(DateTime t, string key, object[] args)> logs = new();
     readonly WinTimer updateTimer = new() { Interval = 6 * 60 * 60 * 1000 };
     readonly WinTimer autoSyncTimer = new() { Interval = 5 * 60 * 1000 };
+    readonly WinTimer usageTimer = new() { Interval = 30000 };
+    readonly WinTimer inboxTimer = new() { Interval = 5 * 60 * 1000 };
+    EventWaitHandle? quitEvent;
+    enum WinMode { Full, Max, Half }
+    WinMode winMode = WinMode.Full;
+    bool introDone;
 
-    bool startHidden, reallyExit, half, loading = true, started, syncing, shutdownSaved;
+    bool startHidden, reallyExit, loading = true, started, syncing, shutdownSaved;
+    bool half => winMode == WinMode.Half;
     DateTime? lastSyncedSave;
     UpdateInfo? update;
 
     // UI
     Panel titleBar = null!; Label titleLbl = null!; PictureBox logo = null!;
-    Button bUpdate = null!, bSync = null!, bMin = null!, bHalf = null!, bClose = null!;
+    Button bUpdate = null!, bSync = null!, bMin = null!, bHalf = null!, bFull = null!, bClose = null!, bTheme = null!, bLang = null!;
     TableLayoutPanel content = null!;
     Label hStatus = null!, lStatus = null!, lHow = null!, lScreensH = null!, lScreens = null!, lIcons = null!, lSave = null!, lRestore = null!;
     Button bProtect = null!, bSaveNow = null!, bRestore = null!, bPreviewNow = null!;
     Label hSettings = null!, lMode = null!, lLang = null!;
-    Button bContact = null!;
+    Button bContact = null!, bArchive = null!, bCheckUpd = null!, bWhatsNew = null!, bOnboard = null!;
+    Label hLook = null!, lLookDesc = null!, hCrash = null!, lCrash = null!, hAbout = null!, lAbout = null!;
+    CheckBox cCrash = null!;
     Button bAgent = null!, bAgentTop = null!;
     FcAgent.Agent? agent;
     Button bBell = null!;
@@ -46,27 +59,31 @@ public sealed class MainForm : Form
 
     int D(int v) => (int)Math.Round(v * DeviceDpi / 96.0);
 
-    public MainForm(bool startHidden)
+    public MainForm(bool startHidden, Settings? s = null, StoreData? st = null, bool screenshot = false)
     {
         this.startHidden = startHidden;
+        shot = screenshot;
+        settings = s ?? Storage.LoadSettings();
+        store = st ?? Storage.LoadStore();
         Lang.Current = settings.Lang;
+        CoreStrings.Lang = () => Lang.Current;
+        Look.SystemLight = SystemLight;
+        Look.Set(settings.Scheme, settings.Theme, settings.FontScale, notify: false);
 
         Text = Lang.T("app_title");
         FormBorderStyle = FormBorderStyle.None;
         StartPosition = FormStartPosition.Manual;
-        BackColor = Theme.Bg;
-        ForeColor = Theme.Text;
-        Font = new Font("Segoe UI", 10f);
         Icon = Theme.AppIcon();
         DoubleBuffered = true;
         MinimumSize = new Size(D(780), D(540));
+        StyleForm();
 
         BuildUI();
 
-        tray = new NotifyIcon { Icon = Icon, Visible = true, Text = "Desktop Düzen Sabitleyici", ContextMenuStrip = trayMenu };
+        tray = new NotifyIcon { Icon = Icon, Visible = !shot, Text = "Desktop Düzen Sabitleyici", ContextMenuStrip = trayMenu };
         tray.MouseClick += (_, e) => { if (e.Button == MouseButtons.Left) ShowMain(); };
 
-        try
+        if (!shot) try
         {
             agent = new FcAgent.Agent("desktop-duzen", Updater.CurrentText, () => Lang.Current);
             agent.Start(this, tray);
@@ -79,15 +96,27 @@ public sealed class MainForm : Form
         guard.Log += OnLog;
         guard.Changed += RefreshInfo;
 
-        showEvent = new EventWaitHandle(false, EventResetMode.AutoReset, Program.ShowEventName);
-        ThreadPool.RegisterWaitForSingleObject(showEvent, (_, _) =>
+        showEvent = new EventWaitHandle(false, EventResetMode.AutoReset, shot ? null : Program.ShowEventName);
+        if (!shot)
         {
-            try { if (IsHandleCreated) BeginInvoke(ShowMain); } catch { }
-        }, null, -1, false);
-
-        Installer.SetStartup(settings.StartWithWindows);
+            ThreadPool.RegisterWaitForSingleObject(showEvent, (_, _) =>
+            {
+                try { if (IsHandleCreated) BeginInvoke(ShowMain); } catch { }
+            }, null, -1, false);
+            // kurulum programı çalışan kopyayı kibarca kapatır (DesktopDuzenSabitleyici.exe --quit)
+            quitEvent = new EventWaitHandle(false, EventResetMode.AutoReset, Program.QuitEventName);
+            ThreadPool.RegisterWaitForSingleObject(quitEvent, (_, _) =>
+            {
+                try { if (IsHandleCreated) BeginInvoke(ExitApp); } catch { }
+            }, null, -1, true);
+            Installer.SetStartup(settings.StartWithWindows);
+            Installer.TouchUninstallEntry();
+            SystemEvents.UserPreferenceChanged += OnSystemPrefs;
+        }
         updateTimer.Tick += async (_, _) => await CheckUpdateSilently();
         autoSyncTimer.Tick += async (_, _) => await AutoSync();
+        usageTimer.Tick += (_, _) => UpdateUsage();
+        inboxTimer.Tick += async (_, _) => await Inbox.FlushAsync();
 
         ApplyLanguage();
         loading = false;
@@ -118,6 +147,8 @@ public sealed class MainForm : Form
     protected override void OnHandleCreated(EventArgs e)
     {
         base.OnHandleCreated(e);
+        Theme.DarkTitle(this);
+        if (shot) return;
         Win32.RegisterHotKey(Handle, 1, 0x0001 | 0x0002 | 0x4000, (uint)Keys.S); // Ctrl+Alt+S (no repeat)
         if (started) return;
         started = true;
@@ -127,7 +158,11 @@ public sealed class MainForm : Form
             RefreshInfo();
             updateTimer.Start();
             autoSyncTimer.Start();
+            usageTimer.Start();
+            inboxTimer.Start();
+            if (!startHidden) Intro();
             await Task.Delay(4000);
+            _ = Inbox.FlushAsync();
             await CheckUpdateSilently();
             await announcements.StartAsync();
         });
@@ -139,18 +174,31 @@ public sealed class MainForm : Form
         ApplyFull();
     }
 
+    /// <summary>Tam ekran (her açılışta): ekranın tamamı.</summary>
     void ApplyFull()
     {
-        half = false;
+        winMode = WinMode.Full;
         WindowState = FormWindowState.Normal;
         Padding = Padding.Empty;
-        Bounds = Screen.FromPoint(Cursor.Position).WorkingArea;
+        Bounds = shot ? new Rectangle(0, 0, D(1600), D(940)) : Screen.FromPoint(Cursor.Position).Bounds;
         UpdateHalfGlyph();
     }
 
+    /// <summary>Büyütülmüş: görev çubuğu görünür kalır.</summary>
+    void ApplyMax()
+    {
+        winMode = WinMode.Max;
+        WindowState = FormWindowState.Normal;
+        Padding = Padding.Empty;
+        Bounds = Screen.FromControl(this).WorkingArea;
+        UpdateHalfGlyph();
+    }
+
+    void ToggleFull() { if (winMode == WinMode.Full) ApplyMax(); else ApplyFull(); }
+
     void ApplyHalf()
     {
-        half = true;
+        winMode = WinMode.Half;
         WindowState = FormWindowState.Normal;
         Padding = new Padding(D(5)); // free edge so the window can be resized with the mouse
         var wa = Screen.FromControl(this).WorkingArea;
@@ -165,7 +213,9 @@ public sealed class MainForm : Form
     {
         if (bHalf == null) return;
         bHalf.Text = half ? Theme.GMax : Theme.GRestore;
-        tips.SetToolTip(bHalf, Lang.T(half ? "tt_full" : "tt_half"));
+        tips.SetToolTip(bHalf, CoreStrings.T(half ? "fc.win.restore" : "fc.win.half"));
+        bFull.Text = winMode == WinMode.Full ? Theme.GBackFull : Theme.GFull;
+        tips.SetToolTip(bFull, CoreStrings.T("fc.win.fullscreen"));
     }
 
     protected override void WndProc(ref Message m)
@@ -209,6 +259,7 @@ public sealed class MainForm : Form
         if (WindowState == FormWindowState.Minimized) WindowState = FormWindowState.Normal;
         Activate();
         BringToFront();
+        if (!introDone && started) BeginInvoke(Intro);
     }
 
     void HideToTray()
@@ -236,6 +287,7 @@ public sealed class MainForm : Form
             guard.SaveBeforeShutdown("shutdown", "log_shutdown");
         }
         try { Win32.UnregisterHotKey(Handle, 1); } catch { }
+        SystemEvents.UserPreferenceChanged -= OnSystemPrefs;
         tray.Visible = false;
         guard.Dispose();
         base.OnFormClosing(e);
@@ -254,12 +306,14 @@ public sealed class MainForm : Form
     {
         var b = new Button
         {
-            Text = glyph, Font = new Font(Theme.IconFont, 10f), Width = D(54), Height = D(44),
+            Text = glyph, Font = Fonts.Icon(10f), Width = D(50), Height = D(46),
             FlatStyle = FlatStyle.Flat, ForeColor = Theme.Text, BackColor = Theme.TitleBg,
             Margin = Padding.Empty, TabStop = false, Cursor = Cursors.Hand, UseVisualStyleBackColor = false,
         };
         b.FlatAppearance.BorderSize = 0;
         b.FlatAppearance.MouseOverBackColor = danger ? Color.FromArgb(232, 17, 35) : Theme.Hover;
+        b.FlatAppearance.MouseDownBackColor = danger ? Color.FromArgb(200, 15, 30) : Look.Tok("active-line", Theme.TitleBg);
+        if (danger) { b.MouseEnter += (_, _) => b.ForeColor = Color.White; b.MouseLeave += (_, _) => b.ForeColor = Theme.Text; }
         b.Click += (_, _) => click();
         return b;
     }
@@ -269,9 +323,17 @@ public sealed class MainForm : Form
         AutoSize = true, Font = f, ForeColor = c ?? Theme.Text, Margin = new Padding(0, 4, 0, 4), BackColor = Color.Transparent,
     };
 
+    /// <summary>Bölüm başlığı (Falcon .card-title: küçük, kalın, label rengi).</summary>
+    Label Section(Font f)
+    {
+        var l = L(f, Theme.Label);
+        l.Margin = new Padding(0, D(16), 0, D(2));
+        return l;
+    }
+
     Panel Card(Control inner)
     {
-        var p = new Panel { Dock = DockStyle.Fill, BackColor = Theme.Card, Padding = new Padding(D(20)), Margin = new Padding(D(8)) };
+        var p = new CardPanel { Dock = DockStyle.Fill, Padding = new Padding(D(20)), Margin = new Padding(D(8)) };
         inner.Dock = DockStyle.Fill;
         p.Controls.Add(inner);
         return p;
@@ -286,18 +348,24 @@ public sealed class MainForm : Form
         f.SizeChanged += (_, _) =>
         {
             foreach (Control c in f.Controls)
-                if (c is Label or RadioButton or CheckBox)
-                    c.MaximumSize = new Size(Math.Max(100, f.ClientSize.Width - D(12)), 0);
+                if (c is Label or RadioButton or CheckBox or FlowLayoutPanel)
+                    c.MaximumSize = new Size(Math.Max(100, f.ClientSize.Width - D(24)), 0);
         };
         return f;
     }
 
     void BuildUI()
     {
-        var hFont = new Font("Segoe UI Semibold", 13f);
+        var hFont = Theme.F(13f, true);
+        var sFont = Theme.F(10f, true);
 
-        // ---- title bar with the window buttons in the top-right corner ----
-        titleBar = new Panel { Dock = DockStyle.Top, Height = D(44), BackColor = Theme.TitleBg };
+        // ---- üst çubuk: sağ üstte (soldan sağa) 🔔 · Eşitle · Güncelle · tema · dil | Küçült · Orta · Tam ekran · Kapat ----
+        titleBar = new Panel { Dock = DockStyle.Top, Height = D(46), BackColor = Theme.TitleBg };
+        titleBar.Paint += (_, e) =>
+        {
+            using var pen = new Pen(Look.Tok("border", Theme.TitleBg));
+            e.Graphics.DrawLine(pen, 0, titleBar.Height - 1, titleBar.Width, titleBar.Height - 1);
+        };
         var btns = new FlowLayoutPanel
         {
             Dock = DockStyle.Right, FlowDirection = FlowDirection.RightToLeft, WrapContents = false,
@@ -305,8 +373,13 @@ public sealed class MainForm : Form
             Margin = Padding.Empty, Padding = Padding.Empty,
         };
         bClose = WinButton(Theme.GClose, () => Close(), danger: true);
+        bFull = WinButton(Theme.GFull, ToggleFull);
         bHalf = WinButton(Theme.GRestore, ToggleHalf);
         bMin = WinButton(Theme.GMin, () => WindowState = FormWindowState.Minimized);
+        var sep = new Panel { Width = Math.Max(1, D(1)), Height = D(22), Margin = new Padding(D(6), D(12), D(6), 0), BackColor = Look.Tok("border-strong", Theme.TitleBg) };
+        bLang = WinButton(LangCode(), ShowLangMenu);
+        bLang.Font = Theme.F(9.5f, true);
+        bTheme = WinButton(Look.IsDark ? Theme.GMoon : Theme.GSun, ToggleTheme);
         bSync = WinButton(Theme.GSync, async () => await SyncClicked());
         bUpdate = WinButton(Theme.GDownload, UpdateClicked);
         bBell = WinButton("🔔", () => { });
@@ -315,17 +388,18 @@ public sealed class MainForm : Form
         bAgentTop.Tag = "fcAgent";
         bBell.Font = new Font("Segoe UI Emoji", 10f);
         bBell.AutoSize = true;
-        btns.Controls.AddRange(new Control[] { bClose, bHalf, bMin, bSync, bUpdate, bBell, bAgentTop });
-        announcements = new Announcements(this, bBell, UpdateClicked);
+        btns.Controls.AddRange(new Control[] { bClose, bFull, bHalf, bMin, sep, bLang, bTheme, bUpdate, bSync, bBell, bAgentTop });
+        if (announcements == null) announcements = new Announcements(this, bBell, UpdateClicked);
+        else announcements.Rebind(bBell);
 
         logo = new PictureBox
         {
             Image = Icon!.ToBitmap(), SizeMode = PictureBoxSizeMode.Zoom, Width = D(26), Height = D(26),
-            Left = D(12), Top = D(9), BackColor = Theme.TitleBg,
+            Left = D(14), Top = D(10), BackColor = Theme.TitleBg,
         };
         titleLbl = new Label
         {
-            AutoSize = true, Left = D(46), Top = D(11), Font = new Font("Segoe UI Semibold", 11f),
+            AutoSize = true, Left = D(48), Top = D(12), Font = Theme.F(11f, true),
             ForeColor = Theme.Text, BackColor = Theme.TitleBg,
         };
         titleBar.Controls.Add(btns);
@@ -338,7 +412,7 @@ public sealed class MainForm : Form
         // ---- content grid ----
         content = new TableLayoutPanel
         {
-            Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 2, Padding = new Padding(D(14)), BackColor = Theme.Bg,
+            Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 2, Padding = new Padding(D(12)), BackColor = Theme.Bg,
         };
         content.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
         content.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
@@ -348,29 +422,29 @@ public sealed class MainForm : Form
         // status card
         var fs = Flow();
         hStatus = L(hFont);
-        lStatus = L(new Font("Segoe UI Semibold", 12f));
-        lHow = L(null, Theme.Sub);
-        lScreensH = L(new Font("Segoe UI Semibold", 10f), Theme.Sub);
+        lStatus = L(Theme.F(12f, true));
+        lHow = L(Theme.F(10f), Theme.Sub);
+        lScreensH = Section(sFont);
+        lScreensH.Margin = new Padding(0, D(10), 0, D(2));
         lScreens = L();
         lIcons = L();
         lSave = L();
         lRestore = L();
         var actions = new FlowLayoutPanel { AutoSize = true, WrapContents = true, BackColor = Theme.Card, Margin = new Padding(0, D(8), 0, 0) };
-        bProtect = Theme.ActionButton("", Theme.Card2);
-        bSaveNow = Theme.ActionButton("", Theme.Accent);
-        bRestore = Theme.ActionButton("", Theme.Green);
+        bProtect = Theme.ActionButton("", Btn.Secondary);
+        bSaveNow = Theme.ActionButton("", Btn.Primary);
+        bRestore = Theme.ActionButton("", Btn.Ok);
         bProtect.Click += (_, _) => ToggleProtect();
         bSaveNow.Click += (_, _) => guard.SaveNow("manual");
         bRestore.Click += (_, _) => guard.RestoreNow();
-        bPreviewNow = Theme.ActionButton("", Color.FromArgb(124, 58, 237));
+        bPreviewNow = Theme.ActionButton("", Btn.Accent2);
         bPreviewNow.Click += (_, _) => OpenPreview(null);
         actions.Controls.AddRange(new Control[] { bSaveNow, bRestore, bPreviewNow, bProtect });
-        hLog = L(new Font("Segoe UI Semibold", 10f), Theme.Sub);
-        hLog.Margin = new Padding(0, D(14), 0, 2);
+        hLog = Section(sFont);
         lb = new ListBox
         {
-            BackColor = Theme.Card2, ForeColor = Theme.Sub, BorderStyle = BorderStyle.None,
-            IntegralHeight = false, Margin = new Padding(0, D(4), 0, 0), Font = new Font("Segoe UI", 9.5f),
+            BackColor = Theme.Input, ForeColor = Theme.Sub, BorderStyle = BorderStyle.None,
+            IntegralHeight = false, Margin = new Padding(0, D(4), 0, 0), Font = Theme.F(9.5f),
             HorizontalScrollbar = true,
         };
         fs.Controls.AddRange(new Control[] { hStatus, lStatus, lHow, lScreensH, lScreens, lIcons, lSave, lRestore, actions, hLog, lb });
@@ -383,29 +457,22 @@ public sealed class MainForm : Form
             if (lb.Width != w || lb.Height != h) lb.Size = new Size(w, h);
         };
 
-        // settings card
+        // settings card — Ayarlar: koruma · Görünüm · Arşiv · Kullanım Limitleri · Otomatik hata raporu · Hakkında · Asistan Agent · Admin ile iletişim (EN SON)
         var fset = Flow();
         hSettings = L(hFont);
-        lMode = L(new Font("Segoe UI Semibold", 10f), Theme.Sub);
-        lModeInfo = L(new Font("Segoe UI", 9.5f), Theme.Text);
+        lMode = Section(sFont);
+        lMode.Margin = new Padding(0, D(8), 0, D(2));
+        lModeInfo = L(Theme.F(9.5f), Theme.Text);
         lModeInfo.Margin = new Padding(0, 4, 0, 10);
-        cAuto = new CheckBox { AutoSize = true, ForeColor = Theme.Text, Margin = new Padding(0, 4, 0, 4) };
-        cStartup = new CheckBox { AutoSize = true, ForeColor = Theme.Text, Margin = new Padding(0, 4, 0, 4) };
-        cAutoSave = new CheckBox { AutoSize = true, ForeColor = Theme.Text, Margin = new Padding(0, 4, 0, 4) };
-        lSaveInfo = L(new Font("Segoe UI", 9f), Theme.Sub);
+        cAuto = new CheckBox { AutoSize = true, ForeColor = Theme.Text, Margin = new Padding(0, 4, 0, 4), FlatStyle = FlatStyle.Flat };
+        cStartup = new CheckBox { AutoSize = true, ForeColor = Theme.Text, Margin = new Padding(0, 4, 0, 4), FlatStyle = FlatStyle.Flat };
+        cAutoSave = new CheckBox { AutoSize = true, ForeColor = Theme.Text, Margin = new Padding(0, 4, 0, 4), FlatStyle = FlatStyle.Flat };
+        lSaveInfo = L(Theme.F(9f), Theme.Sub);
         lSaveInfo.Margin = new Padding(0, 2, 0, 10);
-        lLang = L(new Font("Segoe UI Semibold", 10f), Theme.Sub);
-        cLang = new ComboBox
-        {
-            DropDownStyle = ComboBoxStyle.DropDownList, Width = D(220), FlatStyle = FlatStyle.Flat,
-            BackColor = Theme.Card2, ForeColor = Theme.Text,
-        };
-        foreach (var (_, name) in Lang.Languages) cLang.Items.Add(name);
         cAuto.Checked = settings.DisableAutoArrange;
         cStartup.Checked = settings.StartWithWindows;
         cAutoSave.Checked = settings.AutoSave;
         cAutoSave.CheckedChanged += (_, _) => { if (!loading) { settings.AutoSave = cAutoSave.Checked; Storage.SaveSettings(settings); } };
-        cLang.SelectedIndex = Math.Max(0, Array.FindIndex(Lang.Languages, x => x.code == settings.Lang));
         cAuto.CheckedChanged += (_, _) => { if (!loading) { settings.DisableAutoArrange = cAuto.Checked; Storage.SaveSettings(settings); } };
         cStartup.CheckedChanged += (_, _) =>
         {
@@ -414,28 +481,77 @@ public sealed class MainForm : Form
             Storage.SaveSettings(settings);
             Installer.SetStartup(settings.StartWithWindows);
         };
+        fset.Controls.AddRange(new Control[] { hSettings, lMode, lModeInfo, cAuto, cAutoSave, cStartup, lSaveInfo });
+
+        // Görünüm: şema · tema · yazı boyutu · dil
+        hLook = Section(Theme.F(11.5f, true));
+        lLookDesc = L(Theme.F(9f), Theme.Sub);
+        fset.Controls.Add(hLook);
+        fset.Controls.Add(lLookDesc);
+        OnboardingForm.AddLookControls(fset, D(520), SetLook);
+        lLang = Section(sFont);
+        lLang.Margin = new Padding(0, D(10), 0, D(2));
+        cLang = Theme.Combo();
+        cLang.Width = D(220);
+        foreach (var (_, name) in Lang.Languages) cLang.Items.Add(name);
+        cLang.SelectedIndex = Math.Max(0, Array.FindIndex(Lang.Languages, x => x.code == settings.Lang));
         cLang.SelectedIndexChanged += (_, _) =>
         {
             if (loading || cLang.SelectedIndex < 0) return;
-            settings.Lang = Lang.Languages[cLang.SelectedIndex].code;
-            Storage.SaveSettings(settings);
-            ApplyLanguage();
+            BeginInvoke(() => SetLang(Lang.Languages[cLang.SelectedIndex].code));
         };
-        bAgent = Theme.ActionButton("", Theme.Card2);
-        bAgent.Margin = new Padding(0, D(14), 0, 0);
+        fset.Controls.Add(lLang);
+        fset.Controls.Add(cLang);
+
+        // Arşiv
+        bArchive = Theme.ActionButton("", Btn.Secondary);
+        bArchive.Margin = new Padding(0, D(16), 0, 0);
+        bArchive.Click += (_, _) =>
+        {
+            using var f = new ArchiveForm(store);
+            f.ShowDialog(this);
+            if (f.Changed) RefreshProfiles();
+        };
+        fset.Controls.Add(bArchive);
+
+        // Kullanım Limitleri
+        lUsageH = Section(sFont);
+        lUsage = L(Theme.F(9f), Theme.Sub);
+        lUsage.Margin = new Padding(0, 2, 0, 4);
+        fset.Controls.Add(lUsageH);
+        fset.Controls.Add(lUsage);
+
+        // Otomatik hata raporu
+        hCrash = Section(sFont);
+        cCrash = new CheckBox { AutoSize = true, ForeColor = Theme.Text, Margin = new Padding(0, 4, 0, 2), FlatStyle = FlatStyle.Flat, Checked = shot || Crash.Enabled };
+        cCrash.CheckedChanged += (_, _) => { if (!loading) { Crash.Enabled = cCrash.Checked; UpdateCrashInfo(); } };
+        lCrash = L(Theme.F(9f), Theme.Sub);
+        fset.Controls.AddRange(new Control[] { hCrash, cCrash, lCrash });
+
+        // Hakkında
+        hAbout = Section(sFont);
+        lAbout = L(Theme.F(9.5f), Theme.Text);
+        var aboutRow = new FlowLayoutPanel { AutoSize = true, WrapContents = true, BackColor = Theme.Card, Margin = new Padding(0, 0, 0, 0) };
+        bCheckUpd = Theme.ActionButton("", Btn.Secondary);
+        bCheckUpd.Click += (_, _) => UpdateClicked();
+        bWhatsNew = Theme.ActionButton("", Btn.Secondary);
+        bWhatsNew.Click += (_, _) => ShowWhatsNew();
+        bOnboard = Theme.ActionButton("", Btn.Secondary);
+        bOnboard.Click += (_, _) => ShowOnboarding();
+        aboutRow.Controls.AddRange(new Control[] { bCheckUpd, bWhatsNew, bOnboard });
+        fset.Controls.AddRange(new Control[] { hAbout, lAbout, aboutRow });
+
+        bAgent = Theme.ActionButton("", Btn.Secondary);
+        bAgent.Margin = new Padding(0, D(16), 0, 0);
         bAgent.Tag = "fcAgent";
         bAgent.Click += (_, _) => { agent?.ShowSettings(this); UpdateAgentButton(); };
-        bContact = Theme.ActionButton("", Theme.Card2);
-        bContact.Margin = new Padding(0, D(14), 0, 0);
+        fset.Controls.Add(bAgent);
+
+        // Admin ile iletişim — Ayarlar'ın EN SONUNDA
+        bContact = Theme.ActionButton("", Btn.Primary);
+        bContact.Margin = new Padding(0, D(16), 0, D(8));
         bContact.Click += (_, _) => { using var f = new ContactForm(); f.ShowDialog(this); };
-        lUsageH = L(new Font("Segoe UI Semibold", 10f), Theme.Sub);
-        lUsageH.Margin = new Padding(0, D(14), 0, 2);
-        lUsage = L(new Font("Segoe UI", 9f), Theme.Sub);
-        lUsage.Margin = new Padding(0, 2, 0, 4);
-        var usageTimer = new WinTimer { Interval = 30000 };
-        usageTimer.Tick += (_, _) => UpdateUsage();
-        usageTimer.Start();
-        fset.Controls.AddRange(new Control[] { hSettings, lMode, lModeInfo, cAuto, cAutoSave, cStartup, lSaveInfo, lLang, cLang, lUsageH, lUsage, bAgent, bContact });
+        fset.Controls.Add(bContact);
 
         // profiles card
         var tp = new TableLayoutPanel { ColumnCount = 1, RowCount = 3, BackColor = Theme.Card };
@@ -446,8 +562,8 @@ public sealed class MainForm : Form
         lv = new ListView
         {
             View = View.Details, FullRowSelect = true, MultiSelect = false, HeaderStyle = ColumnHeaderStyle.Nonclickable,
-            BackColor = Theme.Card2, ForeColor = Theme.Text, BorderStyle = BorderStyle.None, Dock = DockStyle.Fill,
-            OwnerDraw = true, Margin = new Padding(0, D(6), 0, D(6)),
+            BackColor = Theme.Input, ForeColor = Theme.Text, BorderStyle = BorderStyle.None, Dock = DockStyle.Fill,
+            OwnerDraw = true, Margin = new Padding(0, D(6), 0, D(6)), Font = Theme.F(9.5f),
         };
         lv.Columns.Add("", 300);
         lv.Columns.Add("", 60);
@@ -460,18 +576,18 @@ public sealed class MainForm : Form
         {
             using var bg = new SolidBrush(Theme.Card);
             e.Graphics.FillRectangle(bg, e.Bounds);
-            TextRenderer.DrawText(e.Graphics, e.Header?.Text, new Font("Segoe UI Semibold", 9f), e.Bounds, Theme.Sub,
+            TextRenderer.DrawText(e.Graphics, e.Header?.Text, lv.Font, e.Bounds, Theme.Label,
                 TextFormatFlags.VerticalCenter | TextFormatFlags.Left | TextFormatFlags.EndEllipsis |
                 (Lang.IsRtl ? TextFormatFlags.RightToLeft | TextFormatFlags.Right : 0));
         };
         lv.DrawItem += (_, e) => e.DrawDefault = true;
         lv.DrawSubItem += (_, e) => e.DrawDefault = true;
         lv.Resize += (_, _) => FitColumns();
-        bDel = Theme.ActionButton("", Theme.Red);
+        bDel = Theme.ActionButton("", Btn.Danger);
         bDel.Click += (_, _) => DeleteSelected();
-        bRestoreSel = Theme.ActionButton("", Theme.Green);
+        bRestoreSel = Theme.ActionButton("", Btn.Ok);
         bRestoreSel.Click += (_, _) => RestoreSelected();
-        bPreviewSel = Theme.ActionButton("", Color.FromArgb(124, 58, 237));
+        bPreviewSel = Theme.ActionButton("", Btn.Accent2);
         bPreviewSel.Click += (_, _) => OpenPreview(SelectedSnap());
         var hb = new FlowLayoutPanel { AutoSize = true, WrapContents = true, BackColor = Theme.Card, Margin = Padding.Empty };
         hb.Controls.AddRange(new Control[] { bPreviewSel, bRestoreSel, bDel });
@@ -485,7 +601,7 @@ public sealed class MainForm : Form
         tl.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         tl.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
         hPreview = L(hFont);
-        lPvInfo = L(new Font("Segoe UI", 9f), Theme.Sub);
+        lPvInfo = L(Theme.F(9f), Theme.Sub);
         lPvInfo.AutoEllipsis = true;
         preview = new LayoutPreview(store, () => guard?.CurrentKey ?? "")
         {
@@ -530,6 +646,7 @@ public sealed class MainForm : Form
     {
         Lang.Current = settings.Lang;
         bool rtl = Lang.IsRtl;
+        CoreStrings.Lang = () => Lang.Current;
         content.RightToLeft = rtl ? RightToLeft.Yes : RightToLeft.No;
         trayMenu.RightToLeft = content.RightToLeft;
 
@@ -548,11 +665,22 @@ public sealed class MainForm : Form
         cStartup.Text = Lang.T("startup");
         cAutoSave.Text = Lang.T("autosave");
         lSaveInfo.Text = Lang.T("save_info");
-        lLang.Text = Lang.T("language");
-        bContact.Text = "✉ " + Lang.T("contact_title");
+        lLang.Text = CoreStrings.T("fc.lang");
+        hLook.Text = CoreStrings.T("fc.look");
+        lLookDesc.Text = CoreStrings.T("fc.look.desc");
+        bArchive.Text = "🗄  " + Lang.T("archive_btn") + (store.Archive.Count(a => !a.Restored) is int na && na > 0 ? $"  ({na})" : "");
+        bContact.Text = "✉  " + CoreStrings.T("fc.contact.title");
         UpdateAgentButton();
-        lUsageH.Text = Lang.T("usage_hdr");
+        lUsageH.Text = CoreStrings.T("fc.usage.title");
         UpdateUsage();
+        hCrash.Text = CoreStrings.T("fc.crash.title");
+        cCrash.Text = CoreStrings.T("fc.crash.on");
+        UpdateCrashInfo();
+        hAbout.Text = CoreStrings.T("fc.settings.about");
+        lAbout.Text = $"{Lang.T("app_title")} · {CoreStrings.T("fc.settings.version")} {Updater.CurrentText}";
+        bCheckUpd.Text = CoreStrings.T("fc.update.check");
+        bWhatsNew.Text = CoreStrings.T("fc.wn.show");
+        bOnboard.Text = CoreStrings.T("fc.ob.reopen");
         hProfiles.Text = Lang.T("profiles_hdr");
         lv.Columns[0].Text = Lang.T("col_display");
         lv.Columns[1].Text = Lang.T("col_icons");
@@ -573,8 +701,11 @@ public sealed class MainForm : Form
         miExit.Text = Lang.T("tray_exit");
 
         tips.SetToolTip(bSync, Lang.T("tt_sync"));
-        tips.SetToolTip(bMin, Lang.T("tt_min"));
+        tips.SetToolTip(bMin, CoreStrings.T("fc.win.minimize"));
         tips.SetToolTip(bClose, Lang.T("tt_close"));
+        tips.SetToolTip(bTheme, CoreStrings.T("fc.theme.toggle"));
+        tips.SetToolTip(bLang, CoreStrings.T("fc.lang"));
+        tips.SetToolTip(bDel, Lang.T("tt_delete"));
         UpdateHalfGlyph();
         UpdateUpdateButton();
 
@@ -595,7 +726,7 @@ public sealed class MainForm : Form
         if (guard == null) return;
         bool on = settings.Protect;
         lStatus.Text = Lang.T(on ? "prot_on" : "prot_off");
-        lStatus.ForeColor = on ? Theme.Green : Theme.Red;
+        lStatus.ForeColor = on ? Theme.GreenText : Theme.RedText;
         bProtect.Text = Lang.T(on ? "btn_prot_off" : "btn_prot_on");
 
         var mons = guard.Monitors.Count > 0 ? guard.Monitors : DisplayInfo.GetMonitors();
@@ -627,7 +758,7 @@ public sealed class MainForm : Form
                 var it = new ListViewItem(name + (cur && top ? $"   ◀ {Lang.T("current")}" : ""))
                 {
                     Tag = h.Id,
-                    ForeColor = cur && top ? Theme.Green : top ? Theme.Text : Theme.Sub,
+                    ForeColor = cur && top ? Look.Tok("ok-text", Theme.Input) : top ? Theme.Text : Theme.Sub,
                 };
                 it.SubItems.Add(h.Icons.Count.ToString());
                 it.SubItems.Add(h.SavedUtc.ToLocalTime().ToString("dd.MM.yyyy HH:mm"));
@@ -656,7 +787,7 @@ public sealed class MainForm : Form
         lPvInfo.Text = (cur ? "✔ " : "⚠ ") + name + "   ·   " + s.SavedUtc.ToLocalTime().ToString("dd.MM.yyyy HH:mm") +
             "   ·   " + Lang.F("pv_icons_on", s.Icons.Count) + "   ·   " + Lang.T("src_" + s.Source) +
             (cur ? "" : "   ·   " + Lang.T("pv_other_short"));
-        lPvInfo.ForeColor = cur ? Theme.Sub : Color.FromArgb(251, 191, 36);
+        lPvInfo.ForeColor = cur ? Theme.Sub : Theme.Warn;
     }
 
     string? SelectedSnap() => lv.SelectedItems.Count > 0 ? lv.SelectedItems[0].Tag as string : null;
@@ -679,11 +810,11 @@ public sealed class MainForm : Form
 
     void DeleteSelected()
     {
-        if (SelectedSnap() is not string id || store.Find(id) is not { } f) return;
-        f.p.History.Remove(f.s);
-        if (f.p.History.Count == 0) store.Displays.Remove(f.p.Key);
+        // v1.1.0: kalıcı silme yok — kayıt Arşiv'e taşınır (Ayarlar → Arşiv'den geri alınır)
+        if (SelectedSnap() is not string id || !store.ArchiveSnapshot(id)) return;
         Storage.SaveStore(store);
         RefreshProfiles();
+        bArchive.Text = "🗄  " + Lang.T("archive_btn") + $"  ({store.Archive.Count(a => !a.Restored)})";
     }
 
     void ToggleProtect()
@@ -719,15 +850,15 @@ public sealed class MainForm : Form
     {
         if (update != null)
         {
-            bUpdate.ForeColor = Theme.Green;
-            bUpdate.BackColor = Color.FromArgb(20, 60, 40);
-            tips.SetToolTip(bUpdate, Lang.F("tt_update_new", update.Version.ToString(3)));
+            bUpdate.ForeColor = Look.Tok("ok-text", Theme.TitleBg);
+            bUpdate.BackColor = Look.Tok("ok-soft", Theme.TitleBg);
+            tips.SetToolTip(bUpdate, CoreStrings.T1("fc.update.avail", "v", update.Version.ToString(3)) + " — " + CoreStrings.T("fc.update.press"));
         }
         else
         {
             bUpdate.ForeColor = Theme.Text;
             bUpdate.BackColor = Theme.TitleBg;
-            tips.SetToolTip(bUpdate, Lang.T("tt_update"));
+            tips.SetToolTip(bUpdate, CoreStrings.T("fc.update"));
         }
     }
 
@@ -749,6 +880,7 @@ public sealed class MainForm : Form
 
     void UpdateClicked()
     {
+        if (shot) return;
         using var f = new UpdateForm(update);
         if (f.ShowDialog(this) == DialogResult.OK && f.Installed) ExitApp();
     }
@@ -786,6 +918,7 @@ public sealed class MainForm : Form
         {
             var merged = await GitHubSync.SyncAsync(settings, store);
             store.Displays = merged.Displays;
+            store.Archive = merged.Archive;
             Storage.SaveStore(store);
             Storage.SaveSettings(settings);
             lastSyncedSave = store.LatestUtc;
@@ -819,18 +952,196 @@ public sealed class MainForm : Form
             showEvent.Dispose();
             updateTimer.Dispose();
             autoSyncTimer.Dispose();
+            usageTimer.Dispose();
+            inboxTimer.Dispose();
+            quitEvent?.Dispose();
         }
         base.Dispose(disposing);
     }
 
-    // Ayarlar > Kullanım Limitleri
+    // Ayarlar > Kullanım Limitleri — bulut/AI yok; yalnız kullanıcının kendi GitHub hesabıyla gist eşitlemesi (saatlik istek sınırı)
     void UpdateUsage()
     {
         if (lUsage == null) return;
-        var t = Lang.T("usage_none");
+        bool linked = !shot && GitHubSync.GetToken(settings) != null;
+        var t = linked ? Lang.T("usage_none") : CoreStrings.T("fc.usage.none") + Environment.NewLine + Lang.T("usage_sync_off");
         if (GitHubSync.RateRemaining is int rem && GitHubSync.RateLimit is int lim)
             t += Environment.NewLine + string.Format(Lang.T("usage_gh"), rem, lim, GitHubSync.RateReset?.ToString("HH:mm") ?? "—");
         lUsage.Text = t;
     }
 
+    void UpdateCrashInfo()
+    {
+        if (lCrash == null) return;
+        lCrash.Text = CoreStrings.T("fc.crash.desc") + Environment.NewLine + CoreStrings.T1("fc.crash.sent", "n", shot ? 0 : Crash.SentToday());
+    }
+
+    // ---------------- görünüm (ortak çekirdek) ----------------
+
+    static bool SystemLight()
+    {
+        using var k = Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize");
+        return k?.GetValue("AppsUseLightTheme") is int v && v == 1;
+    }
+
+    void OnSystemPrefs(object? s, UserPreferenceChangedEventArgs e)
+    {
+        if (Look.Mode != "auto" || e.Category != UserPreferenceCategory.General) return;
+        try { BeginInvoke(RebuildUI); } catch { }
+    }
+
+    void StyleForm()
+    {
+        BackColor = Theme.Bg;
+        ForeColor = Theme.Text;
+        Font = Theme.F(10f);
+    }
+
+    string LangCode() => Lang.Current switch { "en" => "EN", "ar" => "ع", _ => "TR" };
+
+    void ShowLangMenu()
+    {
+        var m = new ContextMenuStrip { RightToLeft = Lang.IsRtl ? RightToLeft.Yes : RightToLeft.No, Font = Theme.F(10f) };
+        foreach (var (code, name) in Lang.Languages)
+            m.Items.Add(new ToolStripMenuItem(name, null, (_, _) => BeginInvoke(() => SetLang(code))) { Checked = code == Lang.Current });
+        m.Closed += (_, _) => BeginInvoke(m.Dispose);
+        m.Show(bLang, new Point(0, bLang.Height));
+    }
+
+    void ToggleTheme()
+    {
+        var next = Look.Mode == "auto" ? (Look.IsDark ? "light" : "dark") : Look.Mode == "dark" ? "light" : "dark";
+        SetLook(null, next, null);
+    }
+
+    void SetLang(string code)
+    {
+        if (code == settings.Lang) return;
+        settings.Lang = code;
+        Lang.Current = code;
+        Storage.SaveSettings(settings);
+        RebuildUI();
+    }
+
+    void SetLook(string? scheme, string? mode, double? scale)
+    {
+        Look.Set(scheme, mode, scale, notify: false);
+        settings.Scheme = Look.Scheme;
+        settings.Theme = Look.Mode;
+        settings.FontScale = Look.Scale;
+        Storage.SaveSettings(settings);
+        BeginInvoke(RebuildUI);
+    }
+
+    /// <summary>Şema / tema / yazı boyutu / dil değişince pencere içeriği yeniden kurulur (WinForms'ta en güvenilir yol).</summary>
+    void RebuildUI()
+    {
+        loading = true;
+        SuspendLayout();
+        try
+        {
+            var old = Controls.Cast<Control>().ToList();
+            Controls.Clear();
+            var oldMenu = trayMenu;
+            Lang.Current = settings.Lang;
+            StyleForm();
+            BuildUI();
+            tray.ContextMenuStrip = trayMenu;
+            foreach (var c in old) c.Dispose();
+            oldMenu?.Dispose();
+            ApplyLanguage();
+            UpdateHalfGlyph();
+        }
+        finally
+        {
+            ResumeLayout(true);
+            loading = false;
+        }
+        Theme.DarkTitle(this);
+        Invalidate(true);
+    }
+
+    // ---------------- ilk açılış rehberi · neler yeni ----------------
+
+    /// <summary>İlk kez: rehber (dil + görünüm). Güncellemeden sonraki ilk açılış: "neler yeni" (bir kez).</summary>
+    void Intro()
+    {
+        if (introDone || shot) return;
+        introDone = true;
+        var v = Updater.CurrentText;
+        if (!settings.Onboarded)
+        {
+            settings.Onboarded = true;
+            bool fresh = !Storage.SettingsExisted;
+            var seen = settings.WhatsNewSeen;
+            settings.WhatsNewSeen = v;
+            Storage.SaveSettings(settings);
+            if (fresh) ShowOnboarding();
+            else ShowWhatsNew();    // 1.0.x'ten gelen: yeni görünümü ve Arşiv'i anlat
+            return;
+        }
+        var last = settings.WhatsNewSeen;
+        settings.WhatsNewSeen = v;
+        Storage.SaveSettings(settings);
+        if (last != null && Version.TryParse(last, out var lastV) && Version.TryParse(v, out var curV) && curV > lastV) ShowWhatsNew();
+    }
+
+    void ShowOnboarding()
+    {
+        using var f = new OnboardingForm((lang, scheme, mode, scale) =>
+        {
+            if (lang != null && lang != settings.Lang) { settings.Lang = lang; Lang.Current = lang; Storage.SaveSettings(settings); }
+            if (scheme != null || mode != null || scale != null)
+            {
+                Look.Set(scheme, mode, scale, notify: false);
+                settings.Scheme = Look.Scheme; settings.Theme = Look.Mode; settings.FontScale = Look.Scale;
+                Storage.SaveSettings(settings);
+            }
+            RebuildUI();
+        });
+        f.ShowDialog(this);
+    }
+
+    void ShowWhatsNew()
+    {
+        var v = Updater.CurrentText;
+        using var f = new WhatsNewForm(v, WhatsNewForm.NotesFor(v));
+        f.ShowDialog(this);
+    }
+
+    // ---------------- ekran görüntüsü kipi (CI) ----------------
+
+    /// <summary>Pencereyi (ve istenirse bir iletişim kutusunu) PNG olarak kaydeder. Program --screenshot ile çağırır.</summary>
+    public async Task CaptureAsync(string file, string? dialog)
+    {
+        ApplyFull();
+        RefreshInfo();
+        await Task.Delay(1200);
+        Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(file))!);
+        using (var bmp = new Bitmap(Width, Height))
+        {
+            DrawToBitmap(bmp, new Rectangle(0, 0, Width, Height));
+            bmp.Save(file, System.Drawing.Imaging.ImageFormat.Png);
+        }
+        if (dialog == null) return;
+        Form f = dialog switch
+        {
+            "onboarding" => new OnboardingForm((_, _, _, _) => { }),
+            "whatsnew" => new WhatsNewForm(Updater.CurrentText, WhatsNewForm.NotesFor(Updater.CurrentText)),
+            "contact" => new ContactForm(),
+            "archive" => new ArchiveForm(store),
+            _ => new ContactForm(),
+        };
+        f.StartPosition = FormStartPosition.Manual;
+        f.Location = new Point(40, 40);
+        f.Show(this);
+        await Task.Delay(800);
+        if (f is OnboardingForm ob) { ob.Next(); await Task.Delay(500); }
+        using (var bmp = new Bitmap(f.Width, f.Height))
+        {
+            f.DrawToBitmap(bmp, new Rectangle(0, 0, f.Width, f.Height));
+            bmp.Save(Path.ChangeExtension(file, null) + "-" + dialog + ".png", System.Drawing.Imaging.ImageFormat.Png);
+        }
+        f.Close();
+    }
 }

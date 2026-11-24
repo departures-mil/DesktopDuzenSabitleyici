@@ -9,7 +9,7 @@
     <EnableWindowsTargeting>true</EnableWindowsTargeting>
     <AssemblyName>DesktopDuzenSabitleyici</AssemblyName>
     <RootNamespace>DDS</RootNamespace>
-    <Version>1.0.12</Version>
+    <Version>1.1.0</Version>
     <Product>Desktop Düzen Sabitleyici</Product>
     <Company>departures-mil</Company>
     <ApplicationIcon>app.ico</ApplicationIcon>
@@ -22,6 +22,8 @@
 
   <ItemGroup>
     <EmbeddedResource Include="app.ico" LogicalName="DDS.app.ico" />
+    <!-- ortak çekirdek yazı tipleri (Inter + Noto Sans Arabic, OFL) — Core/Fonts.cs yükler -->
+    <EmbeddedResource Include="../cekirdek/fonts/*.ttf" LogicalName="DDS.fonts.%(Filename).ttf" />
   </ItemGroup>
 
 

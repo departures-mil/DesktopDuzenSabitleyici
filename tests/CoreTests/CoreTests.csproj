@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Windows'a bağlı olmayan çekirdek parçaların testleri (Linux CI'da da çalışır; NuGet paketi gerekmez).
+       Çalıştır: dotnet run, proje tests/CoreTests -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <!-- eski (1.0.11) güncelleyici bu derlemenin sürümünü "kurulu sürüm" sanar -->
+    <Version>1.0.11</Version>
+    <NoWarn>$(NoWarn);CA1416;CS8618;CS0162</NoWarn>
+    <InvariantGlobalization>true</InvariantGlobalization>
+  </PropertyGroup>
+  <ItemGroup>
+    <Using Include="System.Drawing" />
+    <Compile Include="../../src/Core/Generated.cs;../../src/Core/Look.cs;../../src/Core/CoreText.cs;../../src/Core/Fcd1.cs;../../src/Core/CoreState.cs;../../src/Core/Inbox.cs;../../src/Core/Crash.cs" LinkBase="core" />
+    <Compile Include="../../src/Storage.cs;../../src/LayoutEngine.cs;../../src/DisplayInfo.cs;../../src/Native.cs;../../src/DesktopIcons.cs;../../src/GitHubSync.cs;../../src/Updater.cs;../../src/Lang.cs" LinkBase="app" />
+    <Compile Include="../../tools/DeltaMaker/Ddsd1.cs" LinkBase="tools" />
+  </ItemGroup>
+</Project>
