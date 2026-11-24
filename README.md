@@ -35,3 +35,8 @@ anahtarı girmeniz gerekir. Anahtar girildikten sonra eşitleme her 5 dakikada b
 Her yayında CI, son 5 sürümün her biri için `DesktopDuzenSabitleyici-patch-from-X.Y.Z.bin` yaması üretir ve doğrular.
 Uygulama önce bu yamayı indirir (genelde 1 MB'ın altında), bilgisayardaki exe ile birleştirir ve SHA-256 ile doğrular.
 Yama yoksa veya bir sorun çıkarsa otomatik olarak tam dosyaya geçer.
+
+## Asistan Agent (1.0.12)
+`src/FcAgent.cs` + `src/FcAgentDil.cs` (= ortak-cekirdek/dotnet): bütün programlardaki çalışmayı sayılarla izler, çevrim dışı kurallarla öneri
+verir; sağ üstte ✦ (okunmamış sayısı), Ayarlar'da "✦ Asistan Agent" (iletişim düğmesinin önünde), tepside balon bildirimi.
+Aynı bilgisayardaki programlarla %APPDATA%\FalconCekirdek\agent üzerinden paylaşım.

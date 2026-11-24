@@ -28,6 +28,8 @@ public sealed class MainForm : Form
     Button bProtect = null!, bSaveNow = null!, bRestore = null!, bPreviewNow = null!;
     Label hSettings = null!, lMode = null!, lLang = null!;
     Button bContact = null!;
+    Button bAgent = null!, bAgentTop = null!;
+    FcAgent.Agent? agent;
     Button bBell = null!;
     Announcements announcements = null!;
     CheckBox cAuto = null!, cStartup = null!, cAutoSave = null!;
@@ -63,6 +65,15 @@ public sealed class MainForm : Form
 
         tray = new NotifyIcon { Icon = Icon, Visible = true, Text = "Desktop Düzen Sabitleyici", ContextMenuStrip = trayMenu };
         tray.MouseClick += (_, e) => { if (e.Button == MouseButtons.Left) ShowMain(); };
+
+        try
+        {
+            agent = new FcAgent.Agent("desktop-duzen", Updater.CurrentText, () => Lang.Current);
+            agent.Start(this, tray);
+            agent.OnRedraw(() => { if (IsHandleCreated) BeginInvoke(UpdateAgentButton); });
+            UpdateAgentButton();
+        }
+        catch { agent = null; }
 
         guard = new Guardian(store, settings);
         guard.Log += OnLog;
@@ -299,9 +310,12 @@ public sealed class MainForm : Form
         bSync = WinButton(Theme.GSync, async () => await SyncClicked());
         bUpdate = WinButton(Theme.GDownload, UpdateClicked);
         bBell = WinButton("🔔", () => { });
+        bAgentTop = WinButton("✦", () => agent?.ShowPanel(this));
+        bAgentTop.AutoSize = true;
+        bAgentTop.Tag = "fcAgent";
         bBell.Font = new Font("Segoe UI Emoji", 10f);
         bBell.AutoSize = true;
-        btns.Controls.AddRange(new Control[] { bClose, bHalf, bMin, bSync, bUpdate, bBell });
+        btns.Controls.AddRange(new Control[] { bClose, bHalf, bMin, bSync, bUpdate, bBell, bAgentTop });
         announcements = new Announcements(this, bBell, UpdateClicked);
 
         logo = new PictureBox
@@ -407,6 +421,10 @@ public sealed class MainForm : Form
             Storage.SaveSettings(settings);
             ApplyLanguage();
         };
+        bAgent = Theme.ActionButton("", Theme.Card2);
+        bAgent.Margin = new Padding(0, D(14), 0, 0);
+        bAgent.Tag = "fcAgent";
+        bAgent.Click += (_, _) => { agent?.ShowSettings(this); UpdateAgentButton(); };
         bContact = Theme.ActionButton("", Theme.Card2);
         bContact.Margin = new Padding(0, D(14), 0, 0);
         bContact.Click += (_, _) => { using var f = new ContactForm(); f.ShowDialog(this); };
@@ -417,7 +435,7 @@ public sealed class MainForm : Form
         var usageTimer = new WinTimer { Interval = 30000 };
         usageTimer.Tick += (_, _) => UpdateUsage();
         usageTimer.Start();
-        fset.Controls.AddRange(new Control[] { hSettings, lMode, lModeInfo, cAuto, cAutoSave, cStartup, lSaveInfo, lLang, cLang, lUsageH, lUsage, bContact });
+        fset.Controls.AddRange(new Control[] { hSettings, lMode, lModeInfo, cAuto, cAutoSave, cStartup, lSaveInfo, lLang, cLang, lUsageH, lUsage, bAgent, bContact });
 
         // profiles card
         var tp = new TableLayoutPanel { ColumnCount = 1, RowCount = 3, BackColor = Theme.Card };
@@ -532,6 +550,7 @@ public sealed class MainForm : Form
         lSaveInfo.Text = Lang.T("save_info");
         lLang.Text = Lang.T("language");
         bContact.Text = "✉ " + Lang.T("contact_title");
+        UpdateAgentButton();
         lUsageH.Text = Lang.T("usage_hdr");
         UpdateUsage();
         hProfiles.Text = Lang.T("profiles_hdr");
@@ -687,6 +706,14 @@ public sealed class MainForm : Form
     }
 
     // ---------------- updates ----------------
+
+    void UpdateAgentButton()
+    {
+        if (bAgent == null || bAgentTop == null) return;
+        bAgent.Text = "✦ " + (agent?.T("title") ?? "Asistan Agent");
+        bAgentTop.Text = agent?.ButtonText ?? "✦";
+        bAgentTop.Visible = agent != null && agent.On && agent.Panel;
+    }
 
     void UpdateUpdateButton()
     {
