@@ -176,14 +176,32 @@ public static class Updater
     {
         if (info?.Notes != null)
             CoreState.Set("whatsnew.pending", new Dictionary<string, object> { ["version"] = info.Version.ToString(3), ["notes"] = info.Notes });
-        if (info?.NeedsSetup == true)
-        {
-            Process.Start(new ProcessStartInfo(newFile) { UseShellExecute = true });
-            return;
-        }
         var cur = Environment.ProcessPath!;
         int pid = Environment.ProcessId;
         var script = Path.Combine(Path.GetTempPath(), "DDS_update", "apply.cmd");
+        if (info?.NeedsSetup == true)
+        {
+            // 1.1.2: kurulum SESSİZ (/S) ve gizli konsolda: program kapanınca kurulur, bitince program yeniden açılır.
+            var setup = newFile.EndsWith(".exe", StringComparison.OrdinalIgnoreCase) ? newFile : newFile + ".exe";
+            if (setup != newFile) File.Move(newFile, setup, true);
+            File.WriteAllText(script,
+$@"@echo off
+chcp 65001 >nul
+:wait
+tasklist /FI ""PID eq {pid}"" 2>nul | find ""{pid}"" >nul && (ping -n 2 127.0.0.1 >nul & goto wait)
+start """" /wait ""{setup}"" /S
+del ""{setup}"" >nul 2>&1
+if exist ""%LOCALAPPDATA%\Programs\DesktopDuzenSabitleyici\{AssetName}"" (start """" ""%LOCALAPPDATA%\Programs\DesktopDuzenSabitleyici\{AssetName}"" --updated) else if exist ""{cur}"" start """" ""{cur}"" --updated
+del ""%~f0""
+");
+            Process.Start(new ProcessStartInfo("cmd.exe", $"/c \"{script}\"")
+            {
+                CreateNoWindow = true,
+                UseShellExecute = false,
+                WindowStyle = ProcessWindowStyle.Hidden,
+            });
+            return;
+        }
         File.WriteAllText(script,
 $@"@echo off
 chcp 65001 >nul

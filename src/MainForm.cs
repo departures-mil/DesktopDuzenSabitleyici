@@ -886,10 +886,30 @@ public sealed class MainForm : Form
                 update = u;
                 OnLog("log_update", new object[] { u.Version.ToString(3) });
                 UpdateUpdateButton();
+                // 1.1.2: otomatik güncelleme — sorulmadan arka planda indirilir, doğrulanır ve sessiz kurulur;
+                // program birkaç saniyede kendiliğinden yeniden açılır (kayıtlar önce kaydedilir). Hata olursa düğme/balon kalır.
+                if (!shot && await AutoInstall(u)) return;
                 tray.ShowBalloonTip(4000, Lang.T("app_title"), Lang.F("tt_update_new", u.Version.ToString(3)), ToolTipIcon.Info);
             }
         }
         catch { }
+    }
+
+    bool autoInstalling;
+    async Task<bool> AutoInstall(UpdateInfo u)
+    {
+        if (autoInstalling) return false;
+        autoInstalling = true;
+        try
+        {
+            var file = await Updater.DownloadAsync(u, (_, _) => { }, CancellationToken.None);
+            tray.ShowBalloonTip(3000, Lang.T("app_title"), CoreStrings.T("fc.update.installing") + " v" + u.Version.ToString(3), ToolTipIcon.Info);
+            Updater.ApplyAndRestart(file, u);
+            await Task.Delay(800);
+            ExitApp();
+            return true;
+        }
+        catch { autoInstalling = false; return false; }
     }
 
     void UpdateClicked()
