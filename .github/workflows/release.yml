@@ -57,8 +57,24 @@ jobs:
         run: |
           $v = "${{ steps.ver.outputs.version }}"
           $mk = "${env:ProgramFiles(x86)}\NSIS\makensis.exe"
-          if (-not (Test-Path $mk)) { choco install nsis -y --no-progress | Out-Null }
-          if (-not (Test-Path $mk)) { $mk = (Get-Command makensis.exe -ErrorAction Stop).Source }
+          # NSIS kurulu değilse sırayla: choco → winget → SourceForge'dan doğrudan kurulum (biri geçici olarak çalışmazsa diğeri)
+          $cands = { @("${env:ProgramFiles(x86)}\NSIS\makensis.exe", "${env:ProgramFiles}\NSIS\makensis.exe") | Where-Object { Test-Path $_ } | Select-Object -First 1 }
+          $mk = & $cands
+          if (-not $mk) { try { choco install nsis -y --no-progress 2>&1 | Out-Host } catch { Write-Host "choco: $_" }; $mk = & $cands }
+          if (-not $mk) { try { winget install --id NSIS.NSIS -e --silent --accept-source-agreements --accept-package-agreements 2>&1 | Out-Host } catch { Write-Host "winget: $_" }; $mk = & $cands }
+          if (-not $mk) {
+            foreach ($u in @('https://downloads.sourceforge.net/project/nsis/NSIS%203/3.10/nsis-3.10-setup.exe',
+                             'https://sourceforge.net/projects/nsis/files/NSIS%203/3.10/nsis-3.10-setup.exe/download')) {
+              try {
+                Invoke-WebRequest -Uri $u -OutFile "$env:RUNNER_TEMP\nsis-setup.exe" -UserAgent 'Wget' -MaximumRedirection 10
+                Start-Process "$env:RUNNER_TEMP\nsis-setup.exe" -ArgumentList '/S' -Wait
+                $mk = & $cands
+                if ($mk) { break }
+              } catch { Write-Host "indirme: $_" }
+            }
+          }
+          if (-not $mk) { $mk = (Get-Command makensis.exe -ErrorAction Stop).Source }
+          Write-Host "makensis: $mk"
           & $mk -V2 "/DVERSION=$v" "/DEXE=..\out\DesktopDuzenSabitleyici.exe" "/DOUTFILE=..\out\DesktopDuzenSabitleyici-Setup-$v.exe" installer\setup.nsi
           if ($LASTEXITCODE -ne 0) { exit 1 }
       - name: Açılış testi + ekran görüntüleri
