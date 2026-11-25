@@ -1,4 +1,4 @@
-; Desktop Düzen Sabitleyici — kurulum (NSIS 3, Unicode). Kullanıcı başına, yönetici izni gerekmez, tek tık (oneClick).
+; Desktop Simge Sabitleyici (eski adı Desktop Düzen Sabitleyici) — kurulum (NSIS 3, Unicode). Kullanıcı başına, yönetici izni gerekmez, tek tık (oneClick).
 ; Kanal: win-setup (latest.json). Klasör 1.0.x'in kendini kurduğu yerle AYNI: %LOCALAPPDATA%\Programs\DesktopDuzenSabitleyici
 ; Veri (%APPDATA%\DesktopDuzenSabitleyici) kurulumda da kaldırmada da DOKUNULMAZ.
 ; Derleme: makensis /DVERSION=1.1.0 /DEXE=..\out\DesktopDuzenSabitleyici.exe /DOUTFILE=..\out\DesktopDuzenSabitleyici-Setup-1.1.0.exe installer\setup.nsi
@@ -15,10 +15,11 @@ RequestExecutionLevel user
 !ifndef OUTFILE
   !define OUTFILE "DesktopDuzenSabitleyici-Setup-${VERSION}.exe"
 !endif
-!define APPNAME "Desktop Düzen Sabitleyici"
+!define APPNAME "Desktop Simge Sabitleyici"
 !define EXENAME "DesktopDuzenSabitleyici.exe"
 !define UNKEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\DesktopDuzenSabitleyici"
-!define LNK "Desktop Düzen Sabitleyici.lnk"
+!define LNK "Desktop Simge Sabitleyici.lnk"
+!define OLDLNK "Desktop Düzen Sabitleyici.lnk"
 
 Name "${APPNAME}"
 OutFile "${OUTFILE}"
@@ -92,6 +93,13 @@ Section "Install"
   WriteRegDWORD HKCU "${UNKEY}" "NoRepair" 1
   WriteRegDWORD HKCU "${UNKEY}" "EstimatedSize" 70000
 
+  ; 1.1.3 ad değişikliği: eski adlı kısayollar yeni ada taşınır (masaüstündeki yerinde), çift kısayol kalmaz
+  Delete "$SMPROGRAMS\${OLDLNK}"
+  ${If} ${FileExists} "$DESKTOP\${OLDLNK}"
+  ${AndIfNot} ${FileExists} "$DESKTOP\${LNK}"
+    Rename "$DESKTOP\${OLDLNK}" "$DESKTOP\${LNK}"
+  ${EndIf}
+  Delete "$DESKTOP\${OLDLNK}"
   CreateShortcut "$SMPROGRAMS\${LNK}" "$INSTDIR\${EXENAME}" "" "$INSTDIR\${EXENAME}" 0
   CreateShortcut "$DESKTOP\${LNK}" "$INSTDIR\${EXENAME}" "" "$INSTDIR\${EXENAME}" 0
 
@@ -106,6 +114,8 @@ Section "Uninstall"
   RMDir "$INSTDIR"
   Delete "$SMPROGRAMS\${LNK}"
   Delete "$DESKTOP\${LNK}"
+  Delete "$SMPROGRAMS\${OLDLNK}"
+  Delete "$DESKTOP\${OLDLNK}"
   DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "DesktopDuzenSabitleyici"
   DeleteRegKey HKCU "${UNKEY}"
   ; %APPDATA%\DesktopDuzenSabitleyici (kayıtlarınız) bilerek silinmez.

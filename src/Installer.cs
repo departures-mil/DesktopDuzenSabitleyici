@@ -18,6 +18,13 @@ public static class Installer
     public static readonly string InstallExe = Path.Combine(InstallDir, "DesktopDuzenSabitleyici.exe");
     const string RunKey = @"Software\Microsoft\Windows\CurrentVersion\Run";
     const string RunName = "DesktopDuzenSabitleyici";
+    /// <summary>Görünen ad (1.1.3'ten beri). Klasör, exe, veri ve kayıt defteri adları DEĞİŞMEZ (eski sürümlerle uyum).</summary>
+    public const string DisplayName = "Desktop Simge Sabitleyici";
+    public const string OldDisplayName = "Desktop Düzen Sabitleyici";
+    static string Lnk => DisplayName + ".lnk";
+    static string OldLnk => OldDisplayName + ".lnk";
+    static string ProgramsDir => Environment.GetFolderPath(Environment.SpecialFolder.Programs);
+    static string DesktopDir => Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory);
 
     /// <summary>If started from somewhere else (e.g. Downloads), copy to the install folder and relaunch from there.</summary>
     public static bool RelocateIfNeeded(string[] args)
@@ -42,9 +49,9 @@ public static class Installer
 
     public static void CreateShortcuts()
     {
-        var name = "Desktop Düzen Sabitleyici.lnk";
-        TryShortcut(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Programs), name));
-        var desk = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory), name);
+        RenameShortcuts();
+        TryShortcut(Path.Combine(ProgramsDir, Lnk));
+        var desk = Path.Combine(DesktopDir, Lnk);
         if (!File.Exists(desk)) TryShortcut(desk);
     }
 
@@ -58,11 +65,70 @@ public static class Installer
             link.SetPath(InstallExe);
             link.SetWorkingDirectory(InstallDir);
             link.SetIconLocation(InstallExe, 0);
-            link.SetDescription("Desktop Düzen Sabitleyici");
+            link.SetDescription(DisplayName);
             ((IPersistFile)obj).Save(lnk, true);
             System.Runtime.InteropServices.Marshal.ReleaseComObject(obj);
         }
         catch { }
+    }
+
+    /// <summary>Eski adlı kısayolları yeni ada taşır (masaüstündeki yerinde yeniden adlandırılır, konumu korunur).
+    /// Masaüstü kısayolu yeniden adlandırıldıysa yolu döner (eski, yeni); kayıtlardaki anahtarlar buna göre güncellenir.</summary>
+    static (string oldPath, string newPath)? RenameShortcuts()
+    {
+        (string, string)? desk = null;
+        try
+        {
+            var po = Path.Combine(ProgramsDir, OldLnk);
+            var pn = Path.Combine(ProgramsDir, Lnk);
+            if (File.Exists(po)) { if (File.Exists(pn)) File.Delete(po); else File.Move(po, pn); }
+        }
+        catch { }
+        try
+        {
+            var dOld = Path.Combine(DesktopDir, OldLnk);
+            var dNew = Path.Combine(DesktopDir, Lnk);
+            if (File.Exists(dOld))
+            {
+                if (File.Exists(dNew)) File.Delete(dOld);
+                else { File.Move(dOld, dNew); desk = (dOld, dNew); }
+            }
+        }
+        catch { }
+        return desk;
+    }
+
+    /// <summary>1.1.3 ad değişikliği: kısayollar, "Uygulamalar" listesindeki ad ve kayıtlı düzenlerdeki kısayol anahtarı.
+    /// Hiçbir kayıt silinmez; yalnızca eski kısayol yolu yeni yolla değiştirilir. Kayıt değiştiyse true.</summary>
+    public static bool MigrateName(StoreData store)
+    {
+        try
+        {
+            using var k = Registry.CurrentUser.OpenSubKey(UninstallKey, true);
+            if (k != null && (k.GetValue("DisplayName") as string) != DisplayName) k.SetValue("DisplayName", DisplayName);
+        }
+        catch { }
+        RenameShortcuts();
+        // Eski adlı masaüstü kısayolunun kayıtlardaki anahtarını yeni ada çevir (her masaüstü klasörü için: eşitlenen diğer bilgisayarlar dahil).
+        bool changed = false;
+        void Fix(Snapshot? s)
+        {
+            if (s == null) return;
+            foreach (var i in s.Icons)
+                if (i.Key.EndsWith("\\" + OldLnk, StringComparison.OrdinalIgnoreCase))
+                {
+                    var nk = i.Key.Substring(0, i.Key.Length - OldLnk.Length) + Lnk;
+                    if (s.Icons.Any(o => string.Equals(o.Key, nk, StringComparison.OrdinalIgnoreCase))) continue;
+                    i.Key = nk; changed = true;
+                }
+        }
+        try
+        {
+            foreach (var p in store.Displays.Values) foreach (var s in p.History) Fix(s);
+            foreach (var a in store.Archive) Fix(a.Snap);
+        }
+        catch { }
+        return changed;
     }
 
     const string UninstallKey = @"Software\Microsoft\Windows\CurrentVersion\Uninstall\DesktopDuzenSabitleyici";

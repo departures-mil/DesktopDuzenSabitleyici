@@ -71,7 +71,7 @@ public static class Inbox
     {
         var body = new Dictionary<string, string>
         {
-            ["_subject"] = "Desktop Düzen Sabitleyici: " + f["tur"], ["_template"] = "table", ["_captcha"] = "false",
+            ["_subject"] = "Desktop Simge Sabitleyici: " + f["tur"], ["_template"] = "table", ["_captcha"] = "false",
             ["Tur"] = f["tur"], ["Mesaj"] = f["mesaj"], ["Uygulama"] = f["uygulama"], ["Surum"] = f["surum"],
             ["Platform"] = f["platform"], ["Dil"] = f["dil"], ["Cihaz"] = f["cihaz"],
         };

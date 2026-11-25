@@ -1,4 +1,4 @@
-# Desktop Düzen Sabitleyici
+# Desktop Simge Sabitleyici
 
 Masaüstü simgelerinin yerini koruyan Windows aracı. .NET 8 WinForms, çerçevesiz pencere, tek exe (self-contained single-file),
 sistem tepsisinde çalışır. Kaynak `src/`, testler `tests/CoreTests`, kurulum `installer/setup.nsi`, CI `.github/workflows/release.yml`.
@@ -16,6 +16,11 @@ sistem tepsisinde çalışır. Kaynak `src/`, testler `tests/CoreTests`, kurulum
 - Eşitleme: kullanıcının kendi GitHub gist'i (Wi‑Fi/LAN yok — tek masaüstü aracı). Kural (`SyncMerge`, GitHubSync.cs): hiçbir kayıt silinmez;
   "sil" = Arşiv'e taşı, 25 sınırını aşan → arşiv, çakışmada kaybeden → arşiv ("conflict"), uzakta arşivlenen → yerelde de arşiv.
   Arşiv 500'ü aşarsa en eskiler `arsiv-tasma.jsonl`'a eklenir.
+
+## Ad (1.1.3)
+- Görünen ad **Desktop Simge Sabitleyici** (en: Desktop Icon Keeper, ar: مثبّت أيقونات سطح المكتب) — `Installer.DisplayName`.
+  Depo, exe, klasör, veri, kayıt defteri, olay/mutex adları ve release asset adları eski `DesktopDuzenSabitleyici` olarak KALIR (güncelleme uyumu).
+  `Installer.MigrateName` eski adlı kısayolları yerinde yeniden adlandırır ve kayıtlardaki kısayol anahtarını günceller.
 
 ## Kurallar (Milen)
 - Yazışma ve arayüz Türkçe; arayüz tr/en/ar (Arapça RTL). Yeni metin: `src/Lang.cs` (üçlü) ya da çekirdek metni `CoreStrings.T("fc.…")`.

@@ -10,7 +10,7 @@ public static class Lang
 
     static readonly Dictionary<string, (string tr, string en, string ar)> S = new()
     {
-        ["app_title"] = ("Desktop Düzen Sabitleyici", "Desktop Layout Keeper", "مثبّت ترتيب سطح المكتب"),
+        ["app_title"] = ("Desktop Simge Sabitleyici", "Desktop Icon Keeper", "مثبّت أيقونات سطح المكتب"),
         ["status_hdr"] = ("Durum", "Status", "الحالة"),
         ["prot_on"] = ("Koruma AÇIK — masaüstü düzeniniz korunuyor", "Protection ON — your desktop layout is safe", "الحماية مفعّلة — ترتيب سطح المكتب محفوظ"),
         ["prot_off"] = ("Koruma KAPALI — düzen değişirse geri yüklenmez", "Protection OFF — changes will not be restored", "الحماية متوقفة — لن تتم استعادة الترتيب"),
@@ -147,8 +147,8 @@ public static class Lang
         ["reason_restored"] = ("geri alındı", "brought back", "أُعيد"),
         ["col_reason"] = ("Neden", "Reason", "السبب"),
         ["col_archived"] = ("Arşive giriş", "Archived", "تاريخ الأرشفة"),
-        ["ob_app"] = ("Desktop Düzen Sabitleyici masaüstü simgelerinizin yerini korur: ekran, çözünürlük ya da ölçek değişince düzeni birkaç saniyede geri getirir. Arka planda, sistem tepsisinde çalışır.",
-                      "Desktop Layout Keeper keeps your desktop icons in place: when the display, resolution or scaling changes, it brings the layout back within seconds. It runs in the background, in the system tray.",
+        ["ob_app"] = ("Desktop Simge Sabitleyici masaüstü simgelerinizin yerini korur: ekran, çözünürlük ya da ölçek değişince düzeni birkaç saniyede geri getirir. Arka planda, sistem tepsisinde çalışır.",
+                      "Desktop Icon Keeper keeps your desktop icons in place: when the display, resolution or scaling changes, it brings the layout back within seconds. It runs in the background, in the system tray.",
                       "يحافظ مثبّت ترتيب سطح المكتب على أماكن أيقوناتك: عند تغيّر الشاشة أو الدقة أو التحجيم يعيد الترتيب خلال ثوانٍ. يعمل في الخلفية من علبة النظام."),
         ["err_unexpected"] = ("Beklenmeyen bir hata oluştu. Program çalışmaya devam ediyor.", "An unexpected error occurred. The program keeps running.", "حدث خطأ غير متوقع. يستمر البرنامج في العمل."),
         ["setup_needed"] = ("Bu sürüm için yeni kurulum gerekiyor; kurulum programı indirilip açılacak. Kayıtlarınız korunur.", "This version needs a new installation; the installer will be downloaded and opened. Your records are kept.", "يتطلب هذا الإصدار تثبيتاً جديداً؛ سيتم تنزيل برنامج التثبيت وفتحه. تبقى سجلاتك محفوظة."),

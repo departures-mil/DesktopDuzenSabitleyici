@@ -1,4 +1,4 @@
-# Desktop Düzen Sabitleyici — test → Windows derlemesi (tek exe + NSIS kurulum + ekran görüntüleri)
+# Desktop Simge Sabitleyici — test → Windows derlemesi (tek exe + NSIS kurulum + ekran görüntüleri)
 # → GitHub Release (ortak çekirdek reusable-release: latest.json + FCD1 yamaları) → eski istemciler için DDSD1 köprü yamaları.
 # Yayın: src/DesktopDuzenSabitleyici.csproj <Version> + News (src/Core/CoreForms.cs) + release-notes.json, main'e gönder
 # (ya da Actions → release → Run workflow, main). Bu sürüm zaten yayınlanmışsa release atlanır.
@@ -124,7 +124,7 @@ jobs:
       app_id: desktop-duzen-sabitleyici
       version: ${{ needs.build.outputs.version }}
       file_prefix: DesktopDuzenSabitleyici
-      release_title: Desktop Düzen Sabitleyici v${{ needs.build.outputs.version }}
+      release_title: Desktop Simge Sabitleyici v${{ needs.build.outputs.version }}
       # win-exe asset'i ESKİ ADIYLA yayınlanır: 1.0.x istemcileri releases/latest'te "DesktopDuzenSabitleyici.exe" arar (köprü)
       files: |
         win-exe=DesktopDuzenSabitleyici.exe=DesktopDuzenSabitleyici.exe
