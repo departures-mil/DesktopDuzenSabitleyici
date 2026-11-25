@@ -9,8 +9,8 @@
     <EnableWindowsTargeting>true</EnableWindowsTargeting>
     <AssemblyName>DesktopDuzenSabitleyici</AssemblyName>
     <RootNamespace>DDS</RootNamespace>
-    <Version>1.1.2</Version>
-    <Product>Desktop Düzen Sabitleyici</Product>
+    <Version>1.1.3</Version>
+    <Product>Desktop Simge Sabitleyici</Product>
     <Company>departures-mil</Company>
     <ApplicationIcon>app.ico</ApplicationIcon>
     <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>

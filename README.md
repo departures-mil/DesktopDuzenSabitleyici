@@ -1,4 +1,4 @@
-# Desktop Düzen Sabitleyici
+# Desktop Simge Sabitleyici
 
 Masaüstü simgelerinin yerini korur. Laptop ekranı, büyük monitör, farklı çözünürlük ya da farklı ölçek (%100 / %125 / %150) arasında geçiş yaptığınızda simgeler artık karışmaz.
 

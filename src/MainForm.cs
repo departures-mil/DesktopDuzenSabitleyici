@@ -81,7 +81,7 @@ public sealed class MainForm : Form
 
         BuildUI();
 
-        tray = new NotifyIcon { Icon = Icon, Visible = !shot, Text = "Desktop Düzen Sabitleyici", ContextMenuStrip = trayMenu };
+        tray = new NotifyIcon { Icon = Icon, Visible = !shot, Text = Installer.DisplayName, ContextMenuStrip = trayMenu };
         tray.MouseClick += (_, e) => { if (e.Button == MouseButtons.Left) ShowMain(); };
 
         if (!shot) try
@@ -112,6 +112,7 @@ public sealed class MainForm : Form
             }, null, -1, true);
             Installer.SetStartup(settings.StartWithWindows);
             Installer.TouchUninstallEntry();
+            if (Installer.MigrateName(store)) Storage.SaveStore(store);
             SystemEvents.UserPreferenceChanged += OnSystemPrefs;
         }
         updateTimer.Tick += async (_, _) => await CheckUpdateSilently();

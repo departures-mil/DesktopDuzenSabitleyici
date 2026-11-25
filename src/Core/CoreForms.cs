@@ -7,6 +7,10 @@ public static class News
 {
     public static readonly (string v, string tr, string en, string ar)[] Items =
     {
+        ("1.1.3",
+         "Programın adı artık Desktop Simge Sabitleyici. Masaüstü ve Başlat menüsündeki kısayollar yeni adla aynı yerinde kalır; tüm kayıtlarınız, ayarlarınız ve eşitlemeniz olduğu gibi korunur.",
+         "The program is now called Desktop Icon Keeper (Desktop Simge Sabitleyici). Desktop and Start menu shortcuts keep their place under the new name; all your records, settings and sync are kept as they are.",
+         "أصبح اسم البرنامج الآن «مثبّت أيقونات سطح المكتب» (Desktop Simge Sabitleyici). تبقى الاختصارات على سطح المكتب وفي قائمة ابدأ في مكانها بالاسم الجديد، وتُحفظ جميع سجلاتك وإعداداتك ومزامنتك كما هي."),
         ("1.1.2",
          "Güncellemeler artık tamamen kendiliğinden: yeni sürüm bulununca arka planda indirilir, pencere açmadan kurulur ve program birkaç saniyede yeniden açılır. Kurulum gereken güncellemeler de sessiz yapılır. Kayıtlar korunur.",
          "Updates are now fully automatic: when a new version is found it downloads in the background, installs without any window and the program reopens within seconds. Updates that need the installer also run silently. Records are kept.",
