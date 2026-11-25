@@ -2,7 +2,8 @@ using DDS.Native;
 
 namespace DDS;
 
-public sealed record MonitorInfo(string Device, string Model, Rectangle Bounds, Rectangle Work, bool Primary, int Dpi);
+/// <summary><paramref name="Internal"/>: true = dizüstünün kendi ekranı, false = harici monitör, null = bilinmiyor.</summary>
+public sealed record MonitorInfo(string Device, string Model, Rectangle Bounds, Rectangle Work, bool Primary, int Dpi, bool? Internal = null);
 
 /// <summary>Enumerates monitors directly through Win32 so results are always fresh (no caching).</summary>
 public static class DisplayInfo
@@ -10,6 +11,7 @@ public static class DisplayInfo
     public static List<MonitorInfo> GetMonitors()
     {
         var list = new List<MonitorInfo>();
+        var internals = DisplayKind.InternalDevices();
         Win32.MonitorEnumProc proc = (h, _, _, _) =>
         {
             var mi = new MONITORINFOEX { cbSize = System.Runtime.InteropServices.Marshal.SizeOf<MONITORINFOEX>() };
@@ -18,7 +20,8 @@ public static class DisplayInfo
                 int dpi = 96;
                 try { if (Win32.GetDpiForMonitor(h, 0, out uint dx, out _) == 0 && dx > 0) dpi = (int)dx; } catch { }
                 list.Add(new MonitorInfo(mi.szDevice, ModelOf(mi.szDevice), mi.rcMonitor.ToRectangle(),
-                    mi.rcWork.ToRectangle(), (mi.dwFlags & 1) != 0, dpi));
+                    mi.rcWork.ToRectangle(), (mi.dwFlags & 1) != 0, dpi,
+                    internals == null ? null : internals.Contains(mi.szDevice)));
             }
             return true;
         };

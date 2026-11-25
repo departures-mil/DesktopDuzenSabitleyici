@@ -156,7 +156,7 @@ public sealed class PreviewForm : Form
         var curMons = DisplayInfo.GetMonitors();
         bool sameScreens = isCurrent || DDS.LayoutEngine.SameScreens(p, curMons);
 
-        lTitle.Text = (p.Display.Length > 0 ? p.Display : p.Key).Replace("  +  ", "   +   ");
+        lTitle.Text = p.Title.Replace("  +  ", "   +   ");
         if (isCurrent)
         {
             lBadge.Text = "✔  " + Lang.T("pv_is_current");

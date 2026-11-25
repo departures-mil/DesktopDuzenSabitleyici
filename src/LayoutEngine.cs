@@ -1,7 +1,62 @@
 namespace DDS;
 
+/// <summary>Geri yüklenecek kaydın bu ekrana ne kadar uyduğu.</summary>
+public enum SourceKind { Exact, SameScreens, Nearest }
+
 public static class LayoutEngine
 {
+    /// <summary>
+    /// Şu anki ekranlar için en uygun kayıt:
+    /// 1) bu ekran düzeninin kendi kaydı, 2) aynı monitörlerin başka yerleşimi,
+    /// 3) hiç görülmemiş ekran: en çok benzeyen ekran düzeni (aynı monitör modeli, çözünürlük, en-boy oranı, ölçek, sayı).
+    /// </summary>
+    public static (Profile p, Snapshot s, SourceKind kind)? Choose(IEnumerable<Profile> all, string key, List<MonitorInfo> mons)
+    {
+        var list = all.Where(p => p.Latest != null).ToList();
+        var exact = list.FirstOrDefault(p => p.Key == key);
+        if (exact != null) return (exact, exact.Latest!, SourceKind.Exact);
+        var same = list.Where(p => SameScreens(p, mons)).OrderByDescending(p => p.Latest!.SavedUtc).FirstOrDefault();
+        if (same != null) return (same, same.Latest!, SourceKind.SameScreens);
+        var near = list.Where(p => p.Latest!.Icons.Count > 0)
+            .OrderByDescending(p => Similarity(p, mons))
+            .ThenByDescending(p => p.Latest!.SavedUtc).FirstOrDefault();
+        return near == null ? null : (near, near.Latest!, SourceKind.Nearest);
+    }
+
+    /// <summary>Kayıtlı ekran düzeninin şimdiki ekranlara benzerlik puanı (yüksek = daha benzer).</summary>
+    public static double Similarity(Profile p, List<MonitorInfo> mons)
+    {
+        var src = (p.Monitors.Count > 0 ? p.Monitors : StoreData.MonitorsFromKey(p.Key)).ToList();
+        double score = 0;
+        foreach (var m in mons.OrderByDescending(m => m.Primary))
+        {
+            MonitorRec? best = null;
+            double bs = double.MinValue;
+            foreach (var r in src)
+            {
+                double sc = 0;
+                if (r.Model == m.Model) sc += 100;
+                if (r.W == m.Bounds.Width && r.H == m.Bounds.Height) sc += 40;
+                else
+                {
+                    double ar1 = r.W / (double)Math.Max(1, r.H), ar2 = m.Bounds.Width / (double)Math.Max(1, m.Bounds.Height);
+                    sc += 25 * Math.Max(0, 1 - Math.Abs(ar1 - ar2) * 4);
+                    double a1 = (double)r.W * r.H, a2 = (double)m.Bounds.Width * m.Bounds.Height;
+                    if (a1 > 0 && a2 > 0) sc += 15 * Math.Min(a1, a2) / Math.Max(a1, a2);
+                }
+                if (r.Dpi == m.Dpi) sc += 10;
+                if (r.Primary == m.Primary) sc += 10;
+                if (r.Internal != null && m.Internal != null && r.Internal == m.Internal) sc += 20;
+                if (sc > bs) { bs = sc; best = r; }
+            }
+            if (best != null) { score += bs; src.Remove(best); }
+        }
+        int srcCount = p.Monitors.Count > 0 ? p.Monitors.Count : StoreData.MonitorsFromKey(p.Key).Count;
+        score += srcCount == mons.Count ? 30 : -15 * Math.Abs(srcCount - mons.Count);
+        if (p.Latest?.Source == "old") score -= 60; // eski sürüm kayıtları en son tercih
+        return score;
+    }
+
     public static Profile Shape(List<MonitorInfo> mons, string key, string display) =>
         new() { Key = key, Display = display, Monitors = mons.Select(MonitorRec.From).ToList() };
 

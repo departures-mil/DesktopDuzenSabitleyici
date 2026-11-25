@@ -118,6 +118,24 @@ public static class DesktopIcons
         return result;
     }
 
+    /// <summary>Windows'un "Simgeleri otomatik düzenle" ve "Simgeleri kılavuza hizala" ayarları şu an açık mı?</summary>
+    public static (bool autoArrange, bool snapToGrid) ReadFlags()
+    {
+        using var c = Open();
+        bool auto = c.View.GetAutoArrange() == 0;
+        bool snap = c.View.GetCurrentFolderFlags(out uint f) == 0 && (f & FWF_SNAPTOGRID) != 0;
+        if (!auto && (f & FWF_AUTOARRANGE) != 0) auto = true;
+        return (auto, snap);
+    }
+
+    /// <summary>"Otomatik düzenle" ve/veya "Kılavuza hizala" ayarını kapatır (masaüstü sağ tık → Görünüm ile aynı).</summary>
+    public static void TurnOff(bool autoArrange, bool snapToGrid)
+    {
+        using var c = Open();
+        if (autoArrange) c.View.SetCurrentFolderFlags(FWF_AUTOARRANGE, 0);
+        if (snapToGrid) c.View.SetCurrentFolderFlags(FWF_SNAPTOGRID, 0);
+    }
+
     /// <summary>Moves the given icons to the given screen positions. Returns how many were positioned.</summary>
     public static int Write(IReadOnlyCollection<IconPos> targets, bool disableAutoArrange)
     {

@@ -21,6 +21,9 @@ public sealed class MainForm : Form
     readonly WinTimer autoSyncTimer = new() { Interval = 5 * 60 * 1000 };
     readonly WinTimer usageTimer = new() { Interval = 30000 };
     readonly WinTimer inboxTimer = new() { Interval = 5 * 60 * 1000 };
+    /// <summary>Düşük kaynak: pencere gizliyken 15 dakikada bir kullanılmayan belleği Windows'a geri verir.</summary>
+    readonly WinTimer trimTimer = new() { Interval = 15 * 60 * 1000 };
+    static readonly int WM_TASKBARCREATED = OperatingSystem.IsWindows() ? Win32.RegisterWindowMessage("TaskbarCreated") : -1;
     EventWaitHandle? quitEvent;
     enum WinMode { Full, Max, Half }
     WinMode winMode = WinMode.Full;
@@ -36,6 +39,11 @@ public sealed class MainForm : Form
     Button bUpdate = null!, bSync = null!, bMin = null!, bHalf = null!, bFull = null!, bClose = null!, bTheme = null!, bLang = null!;
     TableLayoutPanel content = null!;
     Label hStatus = null!, lStatus = null!, lHow = null!, lScreensH = null!, lScreens = null!, lIcons = null!, lSave = null!, lRestore = null!;
+    Label lProfile = null!, lArr = null!;
+    Button bArrFix = null!;
+    FlowLayoutPanel arrRow = null!;
+    ContextMenuStrip lvMenu = null!;
+    ToolStripMenuItem miRename = null!;
     Button bProtect = null!, bSaveNow = null!, bRestore = null!, bPreviewNow = null!;
     Label hSettings = null!, lMode = null!, lLang = null!;
     Button bContact = null!, bArchive = null!, bCheckUpd = null!, bWhatsNew = null!, bOnboard = null!;
@@ -96,6 +104,10 @@ public sealed class MainForm : Form
         guard = new Guardian(store, settings);
         guard.Log += OnLog;
         guard.Changed += RefreshInfo;
+        guard.AutoArrangeDetected += () =>
+        {
+            if (!shot) tray.ShowBalloonTip(6000, Lang.T("app_title"), Lang.T("arr_auto"), ToolTipIcon.Warning);
+        };
 
         showEvent = new EventWaitHandle(false, EventResetMode.AutoReset, shot ? null : Program.ShowEventName);
         if (!shot)
@@ -119,6 +131,7 @@ public sealed class MainForm : Form
         autoSyncTimer.Tick += async (_, _) => await AutoSync();
         usageTimer.Tick += (_, _) => UpdateUsage();
         inboxTimer.Tick += async (_, _) => await Inbox.FlushAsync();
+        trimTimer.Tick += (_, _) => { if (!Visible) TrimMemory(); };
 
         ApplyLanguage();
         loading = false;
@@ -162,8 +175,13 @@ public sealed class MainForm : Form
             autoSyncTimer.Start();
             usageTimer.Start();
             inboxTimer.Start();
+            trimTimer.Start();
             if (!startHidden) Intro();
-            await Task.Delay(4000);
+            // Bilgisayar açılırken (--tray) koruma hemen çalışır; güncelleme denetimi, gelen kutusu ve duyurular
+            // Windows'un açılışını yavaşlatmamak için 45 saniye sonra başlar.
+            bool boot = startHidden;
+            await Task.Delay(boot ? 45000 : 4000);
+            if (boot && !Visible) TrimMemory();
             _ = Inbox.FlushAsync();
             await CheckUpdateSilently();
             await announcements.StartAsync();
@@ -228,6 +246,8 @@ public sealed class MainForm : Form
             shutdownSaved = true;
             guard.SaveBeforeShutdown("shutdown", "log_shutdown");
         }
+        if (m.Msg == WM_TASKBARCREATED && WM_TASKBARCREATED > 0 && !shot)
+            guard.ExplorerRestarted(); // Explorer yeniden başladı: düzeni geri getir
         if (m.Msg == WM_HOTKEY && (int)m.WParam == 1)
         {
             guard.SaveNow("hotkey");
@@ -267,6 +287,7 @@ public sealed class MainForm : Form
     void HideToTray()
     {
         Hide();
+        BeginInvoke(async () => { await Task.Delay(5000); if (!Visible) TrimMemory(); });
         if (!settings.TrayHintShown)
         {
             tray.ShowBalloonTip(4000, Lang.T("app_title"), Lang.T("tray_bg"), ToolTipIcon.Info);
@@ -292,6 +313,7 @@ public sealed class MainForm : Form
         SystemEvents.UserPreferenceChanged -= OnSystemPrefs;
         tray.Visible = false;
         guard.Dispose();
+        trimTimer.Dispose();
         base.OnFormClosing(e);
     }
 
@@ -426,6 +448,13 @@ public sealed class MainForm : Form
         lScreensH = Section(sFont);
         lScreensH.Margin = new Padding(0, D(10), 0, D(2));
         lScreens = L();
+        lProfile = L(Theme.F(9.5f, true));
+        // Windows "otomatik düzenle / kılavuza hizala" uyarısı (yalnızca açıkken görünür)
+        arrRow = new FlowLayoutPanel { AutoSize = true, WrapContents = true, BackColor = Theme.Card, Margin = new Padding(0, D(6), 0, D(2)), Visible = false };
+        lArr = L(Theme.F(9.5f), Theme.Warn);
+        bArrFix = Theme.ActionButton("", Btn.Secondary);
+        bArrFix.Click += (_, _) => guard.TurnOffArrangeFlags();
+        arrRow.Controls.AddRange(new Control[] { lArr, bArrFix });
         lIcons = L();
         lSave = L();
         lRestore = L();
@@ -448,8 +477,15 @@ public sealed class MainForm : Form
         };
         Theme.DarkScroll(lb);
         statusFlow = fs;
-        fs.Controls.AddRange(new Control[] { hStatus, lStatus, lHow, lScreensH, lScreens, lIcons, lSave, lRestore, actions, hLog, lb });
-        fs.SizeChanged += (_, _) => actions.MaximumSize = new Size(Math.Max(100, fs.ClientSize.Width - D(12)), 0);
+        fs.Controls.AddRange(new Control[] { hStatus, lStatus, lHow, lScreensH, lScreens, lProfile, arrRow, lIcons, lSave, lRestore, actions, hLog, lb });
+        fs.SizeChanged += (_, _) =>
+        {
+            int mw = Math.Max(100, fs.ClientSize.Width - D(12));
+            actions.MaximumSize = new Size(mw, 0);
+            arrRow.MaximumSize = new Size(mw, 0);
+            lArr.MaximumSize = new Size(Math.Max(100, mw - D(10)), 0);
+            lProfile.MaximumSize = new Size(mw, 0);
+        };
         // the activity list takes whatever room is left at the bottom of the status card
         fs.Layout += (_, _) =>
         {
@@ -567,6 +603,17 @@ public sealed class MainForm : Form
             BackColor = Theme.Input, ForeColor = Theme.Text, BorderStyle = BorderStyle.None, Dock = DockStyle.Fill,
             OwnerDraw = true, Margin = new Padding(0, D(6), 0, D(6)), Font = Theme.F(9.5f),
         };
+        // her satırda kaydın küçük önizlemesi: satır yüksekliği bir ImageList ile büyütülür
+        lv.SmallImageList = new ImageList { ImageSize = new Size(1, D(46)) };
+        lvMenu = new ContextMenuStrip();
+        miRename = new ToolStripMenuItem("", null, (_, _) => RenameSelected());
+        lvMenu.Items.Add(miRename);
+        lvMenu.Opening += (_, e) => { if (SelectedSnap() == null) e.Cancel = true; };
+        lv.ContextMenuStrip = lvMenu;
+        lv.MouseDown += (_, e) =>
+        {
+            if (e.Button == MouseButtons.Right && lv.GetItemAt(e.X, e.Y) is ListViewItem hit) hit.Selected = true;
+        };
         lv.Columns.Add("", 300);
         lv.Columns.Add("", 60);
         lv.Columns.Add("", 140);
@@ -591,6 +638,13 @@ public sealed class MainForm : Form
             if (e.Item.Selected && e.ColumnIndex == 0)
                 using (var a = new SolidBrush(Theme.Accent)) e.Graphics.FillRectangle(a, Lang.IsRtl ? e.Bounds.Right - D(3) : e.Bounds.Left, e.Bounds.Top, D(3), e.Bounds.Height);
             var r = e.Bounds; r.Inflate(-D(6), 0);
+            if (e.ColumnIndex == 0 && e.Item.Tag is string sid && store.Find(sid) is { } fs0)
+            {
+                int tw = D(64), th = Math.Max(D(20), e.Bounds.Height - D(8));
+                var tr = new Rectangle(Lang.IsRtl ? r.Right - tw : r.Left, e.Bounds.Top + (e.Bounds.Height - th) / 2, tw, th);
+                LayoutPreview.DrawMini(e.Graphics, tr, fs0.p, fs0.s, fs0.p.Key == guard?.CurrentKey);
+                if (Lang.IsRtl) r.Width -= tw + D(8); else { r.X += tw + D(8); r.Width -= tw + D(8); }
+            }
             TextRenderer.DrawText(e.Graphics, e.SubItem?.Text, lv.Font, r, e.Item.ForeColor,
                 TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis | TextFormatFlags.SingleLine |
                 (Lang.IsRtl ? TextFormatFlags.RightToLeft | TextFormatFlags.Right : TextFormatFlags.Left));
@@ -650,8 +704,8 @@ public sealed class MainForm : Form
         int w = lv.ClientSize.Width;
         lv.Columns[1].Width = D(60);
         lv.Columns[2].Width = D(130);
-        lv.Columns[3].Width = D(120);
-        lv.Columns[0].Width = Math.Max(D(120), w - D(60) - D(130) - D(120) - 4);
+        lv.Columns[3].Width = D(150);
+        lv.Columns[0].Width = Math.Max(D(200), w - D(60) - D(130) - D(150) - 4);
     }
 
     // ---------------- texts ----------------
@@ -705,6 +759,8 @@ public sealed class MainForm : Form
         tips.SetToolTip(bPreviewSel, Lang.T("tt_preview"));
         lv.RightToLeftLayout = rtl;
         bDel.Text = Lang.T("delete");
+        miRename.Text = Lang.T("rename");
+        bArrFix.Text = Lang.T("arr_fix");
         hLog.Text = Lang.T("log_hdr");
         hPreview.Text = Lang.T("pv_title");
         preview.EmptyText = Lang.T("log_noLayout");
@@ -748,6 +804,14 @@ public sealed class MainForm : Form
         lScreens.Text = string.Join("\n", mons.Select((m, i) =>
             $"{i + 1})  {m.Bounds.Width}×{m.Bounds.Height}   %{m.Dpi * 100 / 96}   {m.Model}{(m.Primary ? "   — " + Lang.T("primary") : "")}"));
         lIcons.Text = Lang.F("icons", guard.IconCount);
+        var srcInfo = guard.DescribeSource();
+        int nRec = store.Displays.TryGetValue(guard.CurrentKey, out var curP) ? curP.History.Count : 0;
+        if (srcInfo == null) { lProfile.Text = "▸ " + Lang.T("profile_none"); lProfile.ForeColor = Theme.Sub; }
+        else if (srcInfo.Value.kind == SourceKind.Exact) { lProfile.Text = "✔ " + Lang.F("profile_cur", srcInfo.Value.p.Title, nRec); lProfile.ForeColor = Theme.GreenText; }
+        else if (srcInfo.Value.kind == SourceKind.SameScreens) { lProfile.Text = "↻ " + Lang.F("profile_same", srcInfo.Value.p.Title); lProfile.ForeColor = Theme.Text; }
+        else { lProfile.Text = "⚠ " + Lang.F("profile_new", srcInfo.Value.p.Title); lProfile.ForeColor = Theme.Warn; }
+        arrRow.Visible = guard.AutoArrangeOn || guard.SnapToGridOn;
+        lArr.Text = guard.AutoArrangeOn ? "⚠ " + Lang.T("arr_auto") : guard.SnapToGridOn ? "ℹ " + Lang.T("arr_snap") : "";
         lSave.Text = Lang.F("last_save", When(guard.LastSave));
         lRestore.Text = Lang.F("last_restore", When(guard.LastRestore));
         tray.Text = Lang.T(on ? "prot_on" : "prot_off") is var s && s.Length > 60 ? s[..60] : s;
@@ -765,7 +829,7 @@ public sealed class MainForm : Form
         foreach (var p in profiles)
         {
             bool cur = p.Key == guard.CurrentKey;
-            string name = p.Display.Length > 0 ? p.Display : p.Key;
+            string name = p.Title;
             for (int i = 0; i < p.History.Count; i++)
             {
                 var h = p.History[i];
@@ -798,7 +862,7 @@ public sealed class MainForm : Form
         if (id == null || store.Find(id) is not { } f) { lPvInfo.Text = ""; return; }
         var (p, s) = f;
         bool cur = guard != null && p.Key == guard.CurrentKey;
-        string name = (p.Display.Length > 0 ? p.Display : p.Key);
+        string name = p.Title;
         lPvInfo.Text = (cur ? "✔ " : "⚠ ") + name + "   ·   " + s.SavedUtc.ToLocalTime().ToString("dd.MM.yyyy HH:mm") +
             "   ·   " + Lang.F("pv_icons_on", s.Icons.Count) + "   ·   " + Lang.T("src_" + s.Source) +
             (cur ? "" : "   ·   " + Lang.T("pv_other_short"));
@@ -821,6 +885,31 @@ public sealed class MainForm : Form
         int idx = Math.Max(0, ids.IndexOf(snapId));
         using var f = new PreviewForm(store, ids, idx, () => guard.CurrentKey, id => guard.RestoreSnapshot(id));
         f.ShowDialog(this);
+    }
+
+    /// <summary>Seçili kaydın ekran düzenine ad verir ("Ofis masası" gibi). Boş bırakılırsa otomatik ad kullanılır.</summary>
+    void RenameSelected()
+    {
+        if (SelectedSnap() is not string id || store.Find(id) is not { } f) return;
+        using var dlg = new NameForm(f.p.Name ?? "", f.p.AutoLabel() ?? f.p.Display);
+        if (dlg.ShowDialog(this) != DialogResult.OK) return;
+        var name = dlg.Value.Trim();
+        f.p.Name = name.Length == 0 ? null : name;
+        f.p.NameUtc = DateTime.UtcNow;
+        Storage.SaveStore(store);
+        RefreshInfo();
+    }
+
+    /// <summary>Kullanılmayan belleği Windows'a geri verir (tepside beklerken birkaç MB).</summary>
+    static void TrimMemory()
+    {
+        try
+        {
+            GC.Collect(2, GCCollectionMode.Forced, blocking: true, compacting: true);
+            GC.WaitForPendingFinalizers();
+            Win32.SetProcessWorkingSetSize(Win32.GetCurrentProcess(), (IntPtr)(-1), (IntPtr)(-1));
+        }
+        catch { }
     }
 
     void DeleteSelected()

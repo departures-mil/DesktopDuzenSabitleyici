@@ -193,6 +193,40 @@ public sealed class LayoutPreview : Panel
         else tip.Show(t, this, e.X + D(14), e.Y + D(18), 4000);
     }
 
+    /// <summary>
+    /// Kayıt geçmişi listesindeki küçük önizleme: ekranlar (gerçek oranlarıyla) ve simgeler nokta olarak.
+    /// <paramref name="current"/> = bu ekranın kaydı (vurgu rengiyle çerçevelenir).
+    /// </summary>
+    public static void DrawMini(Graphics g, Rectangle area, Profile p, Snapshot s, bool current)
+    {
+        var mons = p.Monitors.Count > 0 ? p.Monitors : StoreData.MonitorsFromKey(p.Key);
+        if (mons.Count == 0 || area.Width < 8 || area.Height < 8) return;
+        var old = g.SmoothingMode;
+        g.SmoothingMode = SmoothingMode.AntiAlias;
+        try
+        {
+            var vb = mons.Select(m => m.Bounds).Aggregate(Rectangle.Union);
+            float k = Math.Min((area.Width - 2f) / vb.Width, (area.Height - 2f) / vb.Height);
+            float ox = area.X + (area.Width - vb.Width * k) / 2 - vb.X * k, oy = area.Y + (area.Height - vb.Height * k) / 2 - vb.Y * k;
+            using var wall = new SolidBrush(Color.FromArgb(24, 52, 100));
+            using var edge = new Pen(current ? Theme.Accent : Color.FromArgb(100, 116, 139), 1f);
+            foreach (var m in mons)
+            {
+                var r = new RectangleF(ox + m.X * k, oy + m.Y * k, Math.Max(2, m.W * k), Math.Max(2, m.H * k));
+                g.FillRectangle(wall, r);
+                g.DrawRectangle(edge, r.X, r.Y, r.Width, r.Height);
+            }
+            int dpi = mons.FirstOrDefault(m => m.Primary)?.Dpi ?? 96;
+            float cw = (s.SpacingW > 10 ? s.SpacingW : 76 * dpi / 96f) * k, ch = (s.SpacingH > 10 ? s.SpacingH : 98 * dpi / 96f) * k;
+            float d = Math.Clamp(Math.Min(cw, ch) * 0.55f, 1.5f, 4f);
+            using var dot = new SolidBrush(Color.FromArgb(230, 226, 232, 240));
+            foreach (var i in s.Icons)
+                g.FillEllipse(dot, ox + i.X * k + cw / 2 - d / 2, oy + i.Y * k + ch * 0.3f - d / 2, d, d);
+        }
+        catch { }
+        finally { g.SmoothingMode = old; }
+    }
+
     static GraphicsPath Rounded(RectangleF r, float rad)
     {
         var p = new GraphicsPath();
