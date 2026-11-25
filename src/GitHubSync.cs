@@ -169,9 +169,10 @@ public static class SyncMerge
             {
                 if (!m.Displays.TryGetValue(p.Key, out var t))
                 {
-                    t = new Profile { Key = p.Key, Display = p.Display, Monitors = p.Monitors };
+                    t = new Profile { Key = p.Key, Display = p.Display, Monitors = p.Monitors, Name = p.Name, NameUtc = p.NameUtc };
                     m.Displays[p.Key] = t;
                 }
+                else if (p.NameUtc > t.NameUtc) { t.Name = p.Name; t.NameUtc = p.NameUtc; } // en son verilen ad geçerli
                 foreach (var h in p.History)
                 {
                     if (archived.Contains(h.Id)) continue;

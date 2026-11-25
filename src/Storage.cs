@@ -30,6 +30,8 @@ public sealed class MonitorRec
     public int WY { get; set; }
     public int WW { get; set; }
     public int WH { get; set; }
+    /// <summary>true = dizüstünün kendi ekranı, false = harici monitör, null = bilinmiyor (1.2.0 öncesi kayıtlar).</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] public bool? Internal { get; set; }
 
     [JsonIgnore] public Rectangle Bounds => new(X, Y, W, H);
     [JsonIgnore] public Rectangle Work => WW > 0 && WH > 0 ? new(WX, WY, WW, WH) : Bounds;
@@ -38,7 +40,7 @@ public sealed class MonitorRec
     {
         Model = m.Model, Primary = m.Primary, Dpi = m.Dpi,
         X = m.Bounds.X, Y = m.Bounds.Y, W = m.Bounds.Width, H = m.Bounds.Height,
-        WX = m.Work.X, WY = m.Work.Y, WW = m.Work.Width, WH = m.Work.Height,
+        WX = m.Work.X, WY = m.Work.Y, WW = m.Work.Width, WH = m.Work.Height, Internal = m.Internal,
     };
 }
 
@@ -61,8 +63,38 @@ public sealed class Profile
     public string Display { get; set; } = "";
     public List<MonitorRec> Monitors { get; set; } = new();
     public List<Snapshot> History { get; set; } = new();
+    /// <summary>Kullanıcının verdiği ad ("Ofis masası" gibi). Boşsa <see cref="AutoLabel"/> kullanılır.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] public string? Name { get; set; }
+    /// <summary>Adın verildiği an; eşitlemede yeni ad eskisini yener.</summary>
+    public DateTime NameUtc { get; set; }
 
     [JsonIgnore] public Snapshot? Latest => History.Count > 0 ? History[0] : null;
+
+    /// <summary>Listede görünen ad: kullanıcının adı → otomatik ad → eski ayrıntılı metin.</summary>
+    [JsonIgnore] public string Title =>
+        !string.IsNullOrWhiteSpace(Name) ? Name!.Trim() : AutoLabel() is string a ? a : Display.Length > 0 ? Display : Key;
+
+    /// <summary>
+    /// "Sadece dizüstü ekranı · 1920×1080 %125", "Dizüstü + harici monitör · …" gibi otomatik ad.
+    /// Ekranların dahili/harici bilgisi yoksa (eski kayıt) null.
+    /// </summary>
+    public string? AutoLabel()
+    {
+        var mons = Monitors.Count > 0 ? Monitors : StoreData.MonitorsFromKey(Key);
+        if (mons.Count == 0 || mons.Any(m => m.Internal == null)) return null;
+        int i = mons.Count(m => m.Internal == true), e = mons.Count - i;
+        string kind = (i, e) switch
+        {
+            ( > 0, 0) => Lang.T("dk_laptop_only"),
+            (0, 1) => Lang.T("dk_ext_only"),
+            (0, _) => Lang.F("dk_ext_n", e),
+            (_, 1) => Lang.T("dk_laptop_ext"),
+            _ => Lang.F("dk_laptop_ext_n", e),
+        };
+        var res = string.Join(" + ", mons.OrderByDescending(m => m.Internal == true).ThenBy(m => m.X)
+            .Select(m => $"{m.W}×{m.H} %{m.Dpi * 100 / 96}"));
+        return kind + "  ·  " + res;
+    }
 }
 
 /// <summary>Old (v1.0.0 / v1.0.1) layout format, read only for migration.</summary>
@@ -117,7 +149,13 @@ public sealed class StoreData
         else
         {
             p.Display = shape.Display;
-            if (shape.Monitors.Count > 0) p.Monitors = shape.Monitors;
+            if (shape.Monitors.Count > 0)
+            {
+                // dahili/harici bilgisi bu sefer okunamadıysa önceki bilgiyi koru
+                foreach (var nm in shape.Monitors.Where(x => x.Internal == null))
+                    nm.Internal = p.Monitors.FirstOrDefault(o => o.Model == nm.Model)?.Internal;
+                p.Monitors = shape.Monitors;
+            }
         }
         if (p.Latest is { } last && LayoutEngine.SameIcons(last, snap))
         {

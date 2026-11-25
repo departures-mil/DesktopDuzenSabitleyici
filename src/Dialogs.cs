@@ -164,3 +164,45 @@ public sealed class TokenForm : Form
         Controls.AddRange(new Control[] { msg, create, box, ok, cancel });
     }
 }
+
+/// <summary>Ekran düzenine ad verme penceresi (boş = otomatik ad).</summary>
+public sealed class NameForm : Form
+{
+    readonly TextBox box;
+    public string Value => box.Text;
+
+    int D(int v) => (int)Math.Round(v * DeviceDpi / 96.0);
+
+    public NameForm(string current, string auto)
+    {
+        Text = Lang.T("rename_title");
+        Icon = Theme.AppIcon();
+        FormBorderStyle = FormBorderStyle.FixedDialog;
+        MaximizeBox = MinimizeBox = false;
+        ShowInTaskbar = false;
+        StartPosition = FormStartPosition.CenterParent;
+        RightToLeft = Lang.IsRtl ? RightToLeft.Yes : RightToLeft.No;
+        RightToLeftLayout = Lang.IsRtl;
+        Theme.Dialog(this);
+        ClientSize = new Size(D(520), D(230));
+
+        var msg = new Label { Text = Lang.T("rename_hint"), Left = D(24), Top = D(18), Width = D(472), Height = D(60) };
+        var autoLbl = new Label { Text = Lang.F("rename_auto", auto), Left = D(24), Top = D(80), Width = D(472), Height = D(40), ForeColor = Theme.Sub };
+        box = new TextBox
+        {
+            Left = D(24), Top = D(124), Width = D(472), BackColor = Theme.Input, ForeColor = Theme.Text,
+            BorderStyle = BorderStyle.FixedSingle, Text = current, MaxLength = 60, PlaceholderText = Lang.T("rename_ph"),
+        };
+        var ok = Theme.ActionButton(Lang.T("ok"), Btn.Primary);
+        ok.AutoSize = false;
+        ok.SetBounds(D(236), D(172), D(125), D(40));
+        ok.DialogResult = DialogResult.OK;
+        var cancel = Theme.ActionButton(Lang.T("cancel"), Btn.Secondary);
+        cancel.AutoSize = false;
+        cancel.SetBounds(D(371), D(172), D(125), D(40));
+        cancel.DialogResult = DialogResult.Cancel;
+        AcceptButton = ok;
+        CancelButton = cancel;
+        Controls.AddRange(new Control[] { msg, autoLbl, box, ok, cancel });
+    }
+}

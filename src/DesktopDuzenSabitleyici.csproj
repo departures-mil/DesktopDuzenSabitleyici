@@ -9,7 +9,7 @@
     <EnableWindowsTargeting>true</EnableWindowsTargeting>
     <AssemblyName>DesktopDuzenSabitleyici</AssemblyName>
     <RootNamespace>DDS</RootNamespace>
-    <Version>1.1.3</Version>
+    <Version>1.2.0</Version>
     <Product>Desktop Simge Sabitleyici</Product>
     <Company>departures-mil</Company>
     <ApplicationIcon>app.ico</ApplicationIcon>
@@ -18,6 +18,10 @@
     <BuiltInComInteropSupport>true</BuiltInComInteropSupport>
     <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
     <NoWarn>$(NoWarn);CA1416</NoWarn>
+    <!-- düşük kaynak: arka planda çalışan küçük araç için tek, eşzamansız olmayan GC (daha az iş parçacığı ve bellek) -->
+    <ConcurrentGarbageCollection>false</ConcurrentGarbageCollection>
+    <ServerGarbageCollection>false</ServerGarbageCollection>
+    <TieredPGO>true</TieredPGO>
   </PropertyGroup>
 
   <ItemGroup>

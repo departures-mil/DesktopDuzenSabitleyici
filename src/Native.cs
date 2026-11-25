@@ -148,4 +148,11 @@ public static class Win32
     [DllImport("user32.dll")] public static extern bool RegisterHotKey(IntPtr hWnd, int id, uint mods, uint vk);
     [DllImport("user32.dll")] public static extern bool UnregisterHotKey(IntPtr hWnd, int id);
     [DllImport("user32.dll")] public static extern IntPtr SendMessage(IntPtr hWnd, int msg, IntPtr wParam, IntPtr lParam);
+    /// <summary>"TaskbarCreated": Explorer yeniden başladığında tüm üst düzey pencerelere yayınlanır.</summary>
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern int RegisterWindowMessage(string name);
+    [DllImport("kernel32.dll")] public static extern IntPtr GetCurrentProcess();
+    [DllImport("kernel32.dll")] public static extern bool SetProcessWorkingSetSize(IntPtr proc, IntPtr min, IntPtr max);
+    [DllImport("user32.dll")] public static extern int GetDisplayConfigBufferSizes(uint flags, out uint numPaths, out uint numModes);
+    [DllImport("user32.dll")] public static extern int QueryDisplayConfig(uint flags, ref uint numPaths, IntPtr paths, ref uint numModes, IntPtr modes, IntPtr topology);
+    [DllImport("user32.dll")] public static extern int DisplayConfigGetDeviceInfo(IntPtr packet);
 }

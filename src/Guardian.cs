@@ -41,6 +41,18 @@ public sealed class Guardian : IDisposable
 
     public event Action<string, object[]>? Log;
     public event Action? Changed;
+    /// <summary>Windows'un "Simgeleri otomatik düzenle" ayarı açıldı (oturum başına bir kez bildirilir).</summary>
+    public event Action? AutoArrangeDetected;
+
+    // 1.2.0: masaüstü görünüm ayarları ve uyarlanır tarama hızı
+    public bool AutoArrangeOn { get; private set; }
+    public bool SnapToGridOn { get; private set; }
+    bool autoArrangeReported;
+    int flagTicks;
+    DateTime lastActivity = DateTime.Now;
+    const int FastMs = 1500, IdleMs = 3000;
+    /// <summary>Son geri yüklemede kullanılan kaydın türü ve adı (durum satırı için).</summary>
+    public SourceKind? LastSourceKind { get; private set; }
 
     public int IconCount { get; private set; }
     public DateTime? LastSave { get; private set; }
@@ -88,6 +100,8 @@ public sealed class Guardian : IDisposable
 
     void OnSystemDisplayChanged(object? s, EventArgs e)
     {
+        DisplayKind.Invalidate();
+        Touch();
         // Even if the setup ends up the same (a short flicker of resolution), Windows may shuffle the icons.
         Quarantine();
         CheckDisplay();
@@ -95,7 +109,7 @@ public sealed class Guardian : IDisposable
 
     void OnPower(object? s, PowerModeChangedEventArgs e)
     {
-        if (e.Mode == PowerModes.Resume) { Quarantine(); Emit("log_resume"); CheckDisplay(); }
+        if (e.Mode == PowerModes.Resume) { DisplayKind.Invalidate(); Touch(); Quarantine(); Emit("log_resume"); CheckDisplay(); }
         else if (e.Mode == PowerModes.Suspend) SaveBeforeShutdown("sleep", "log_sleep");
     }
 
@@ -108,14 +122,82 @@ public sealed class Guardian : IDisposable
         Monitors = mons;
         lastKey = key;
         trusted = false;
+        Touch();
         Quarantine();
         Emit("log_changed", Friendly());
         Changed?.Invoke();
         if (settings.Protect) ScheduleRestore(2500);
     }
 
+    /// <summary>Bir şey oldu: birkaç dakika hızlı taramaya geç.</summary>
+    void Touch()
+    {
+        lastActivity = DateTime.Now;
+        if (tick.Interval != FastMs) tick.Interval = FastMs;
+    }
+
+    /// <summary>
+    /// Düşük kaynak kullanımı: masaüstünde 3 dakikadır hiçbir şey değişmediyse tarama 3 saniyeye iner;
+    /// ekran değişimi, uyanma, Explorer yeniden başlaması ya da simge hareketi anında hızlı taramaya döner.
+    /// </summary>
+    void AdaptTick()
+    {
+        bool fast = Busy || InQuarantine || (DateTime.Now - lastActivity).TotalMinutes < 3;
+        int want = fast ? FastMs : IdleMs;
+        if (tick.Interval != want) tick.Interval = want;
+    }
+
+    /// <summary>Windows'un "otomatik düzenle / kılavuza hizala" ayarlarını yaklaşık dakikada bir okur.</summary>
+    void CheckFlags(bool force = false)
+    {
+        if (!force && ++flagTicks < 30) return;
+        flagTicks = 0;
+        try
+        {
+            var (auto, snap) = DesktopIcons.ReadFlags();
+            if (auto == AutoArrangeOn && snap == SnapToGridOn) return;
+            AutoArrangeOn = auto;
+            SnapToGridOn = snap;
+            if (auto && !autoArrangeReported)
+            {
+                autoArrangeReported = true;
+                Emit("log_autoarr_on");
+                AutoArrangeDetected?.Invoke();
+            }
+            Changed?.Invoke();
+        }
+        catch { }
+    }
+
+    /// <summary>Kullanıcı "Kapat" dedi: otomatik düzenle / kılavuza hizala kapatılır.</summary>
+    public void TurnOffArrangeFlags()
+    {
+        try
+        {
+            DesktopIcons.TurnOff(AutoArrangeOn, SnapToGridOn);
+            Emit("log_autoarr_off");
+        }
+        catch (Exception ex) { Emit("log_err", ex.Message); }
+        CheckFlags(force: true);
+        Changed?.Invoke();
+    }
+
+    /// <summary>
+    /// Explorer yeniden başladı (çökme, güncelleme, oturum): MainForm "TaskbarCreated" yayınını alınca çağırır.
+    /// Masaüstü penceresinin değişmesini beklemeden düzeni geri getirir.
+    /// </summary>
+    public void ExplorerRestarted()
+    {
+        Touch();
+        Quarantine();
+        if (!initialized || !settings.Protect) return;
+        Emit("log_explorer");
+        ScheduleRestore(3000);
+    }
+
     void OnTick()
     {
+        AdaptTick();
         CheckDisplay();
         if (Busy || DateTime.Now < suppressUntil) return;
 
@@ -124,7 +206,8 @@ public sealed class Guardian : IDisposable
         catch { return; }
         if (cur.Count == 0) return; // desktop not ready yet (sign-in) or empty
 
-        if (!initialized) { Initialize(cur); return; }
+        if (!initialized) { Initialize(cur); CheckFlags(force: true); return; }
+        CheckFlags();
         if (!settings.Protect) { baseline = null; return; }
 
         // Explorer restarted (crash, update, sign-in) -> it may have shuffled the icons.
@@ -145,6 +228,7 @@ public sealed class Guardian : IDisposable
 
         var (moved, membership) = Compare(baseline, map);
         if (!moved && !membership) { candidate = null; MarkTrusted(cur); return; }
+        Touch();
 
         if (!moved)
         {
@@ -348,15 +432,15 @@ public sealed class Guardian : IDisposable
     /// </summary>
     (Profile p, Snapshot s)? ChooseSource()
     {
-        if (store.Displays.TryGetValue(lastKey, out var exact) && exact.Latest != null) return (exact, exact.Latest);
-        var mons = Monitors;
-        var same = store.Displays.Values.Where(p => p.Latest != null && LayoutEngine.SameScreens(p, mons))
-            .OrderByDescending(p => p.Latest!.SavedUtc).FirstOrDefault();
-        if (same != null) return (same, same.Latest!);
-        var any = store.Displays.Values.Where(p => p.Latest != null)
-            .OrderByDescending(p => p.Latest!.Source == "old" ? 0 : 1)
-            .ThenByDescending(p => p.Latest!.SavedUtc).FirstOrDefault();
-        return any == null ? null : (any, any.Latest!);
+        var c = LayoutEngine.Choose(store.Displays.Values, lastKey, Monitors);
+        return c == null ? null : (c.Value.p, c.Value.s);
+    }
+
+    /// <summary>Durum satırı için: bu ekranda hangi kayıt kullanılır (tam eşleşme / aynı ekranlar / en benzer).</summary>
+    public (Profile p, SourceKind kind)? DescribeSource()
+    {
+        var c = LayoutEngine.Choose(store.Displays.Values, lastKey, Monitors.Count > 0 ? Monitors : DisplayInfo.GetMonitors());
+        return c == null ? null : (c.Value.p, c.Value.kind);
     }
 
     List<IconPos>? ComputeTarget(out bool exact, IEnumerable<string>? present = null)
@@ -366,6 +450,11 @@ public sealed class Guardian : IDisposable
         lastKey = DisplayInfo.KeyOf(Monitors);
         (Profile p, Snapshot s)? src = forcedSnapId != null ? store.Find(forcedSnapId) : ChooseSource();
         if (src == null || src.Value.s.Icons.Count == 0) return null;
+        if (forcedSnapId == null && LayoutEngine.Choose(store.Displays.Values, lastKey, Monitors) is { } ch)
+        {
+            LastSourceKind = ch.kind;
+            if (ch.kind == SourceKind.Nearest) Emit("log_nearest", ch.p.Title);
+        }
         return LayoutEngine.BuildAll(store.Displays.Values, src.Value.p, src.Value.s, Monitors,
             DesktopIcons.LastSpacing, present, out exact);
     }
@@ -373,6 +462,7 @@ public sealed class Guardian : IDisposable
     void OnRestoreStep()
     {
         restoreTimer.Stop();
+        Touch();
         try
         {
             if (restoreStep == 0)

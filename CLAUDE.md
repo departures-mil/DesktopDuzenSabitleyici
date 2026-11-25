@@ -22,6 +22,13 @@ sistem tepsisinde çalışır. Kaynak `src/`, testler `tests/CoreTests`, kurulum
   Depo, exe, klasör, veri, kayıt defteri, olay/mutex adları ve release asset adları eski `DesktopDuzenSabitleyici` olarak KALIR (güncelleme uyumu).
   `Installer.MigrateName` eski adlı kısayolları yerinde yeniden adlandırır ve kayıtlardaki kısayol anahtarını günceller.
 
+## 1.2.0
+- Kayıt seçimi `LayoutEngine.Choose` (tam → aynı ekranlar → `Similarity` ile en benzer; en yeni değil). Testli.
+- `DisplayKind` (QueryDisplayConfig) dahili/harici ekranı bulur → `MonitorRec.Internal` → `Profile.Title`/`AutoLabel` ("Sadece dizüstü ekranı"…);
+  kullanıcı adı `Profile.Name` + `NameUtc` (eşitlemede yeni ad kazanır). Geçmiş listesinde `LayoutPreview.DrawMini` küçük önizleme.
+- `TaskbarCreated` → `Guardian.ExplorerRestarted`; otomatik düzenle/kılavuz `DesktopIcons.ReadFlags/TurnOff`, durum kartında uyarı.
+- Düşük kaynak: tarama 3 dk sessizlikte 1,5 sn → 3 sn; açılışta (--tray) güncelleme/duyuru 45 sn sonra; gizliyken bellek kırpma; eşzamansız GC kapalı.
+
 ## Kurallar (kullanıcı)
 - Yazışma ve arayüz Türkçe; arayüz tr/en/ar (Arapça RTL). Yeni metin: `src/Lang.cs` (üçlü) ya da çekirdek metni `CoreStrings.T("fc.…")`.
 - Sürüm semver X.Y.Z, etiket `vX.Y.Z`. Tek kaynak `src/DesktopDuzenSabitleyici.csproj` `<Version>`; ayrıca `News.Items` (src/Core/CoreForms.cs)

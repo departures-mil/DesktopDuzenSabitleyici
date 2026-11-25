@@ -326,6 +326,76 @@ await Group("KÖPRÜ: 1.0.11 güncelleyicisi + yeni istemci, yerel sahte GitHub 
 string WriteTmp(string name, byte[] b) { var p = Path.Combine(tmp, name); File.WriteAllBytes(p, b); return p; }
 
 try { Directory.Delete(tmp, true); } catch { }
+await Group("1.2.0: ekran profilleri, en benzer kayıt, adlar", async () =>
+{
+    MonitorInfo Mon(string model, int w, int h, int x, int dpi, bool prim, bool? inn) =>
+        new("\\\\.\\DISPLAY" + model.Length, model, new Rectangle(x, 0, w, h), new Rectangle(x, 0, w, h - 48), prim, dpi, inn);
+    Profile Prof(string key, string src, params MonitorInfo[] ms)
+    {
+        var p = new Profile { Key = key, Display = key, Monitors = ms.Select(MonitorRec.From).ToList() };
+        var sn = new Snapshot { SavedUtc = DateTime.UtcNow, Source = src };
+        sn.Icons.Add(new IconEntry { Key = "a", X = ms[0].Bounds.X + 10, Y = 10 });
+        p.History.Add(sn);
+        return p;
+    }
+    var laptop = Mon("BOE0A1C", 1920, 1080, 0, 120, true, true);
+    var dell = Mon("DELA0B1", 3840, 2160, 0, 144, true, false);
+    var lg = Mon("GSM5B7F", 2560, 1440, 1920, 96, false, false);
+
+    var pLaptop = Prof(DisplayInfo.KeyOf(new() { laptop }), "user", laptop);
+    var pDell = Prof(DisplayInfo.KeyOf(new() { dell }), "user", dell);
+    var pBoth = Prof(DisplayInfo.KeyOf(new() { laptop, lg }), "user", laptop, lg);
+    var all = new[] { pLaptop, pDell, pBoth };
+
+    var c = LayoutEngine.Choose(all, pDell.Key, new() { dell });
+    Ok(c?.p == pDell && c?.kind == SourceKind.Exact, "aynı ekran → kendi kaydı (tam)");
+
+    // DELL aynı monitör ama ölçek %125'e indi: hiç görülmemiş düzen → en çok benzeyen DELL kaydı olmalı (en yeni değil)
+    pLaptop.History[0].SavedUtc = DateTime.UtcNow.AddMinutes(5);
+    var dell125 = Mon("DELA0B1", 3840, 2160, 0, 120, true, false);
+    c = LayoutEngine.Choose(all, DisplayInfo.KeyOf(new() { dell125 }), new() { dell125 });
+    Ok(c?.p == pDell && c?.kind == SourceKind.Nearest, "bilinmeyen ekran → en benzer (aynı monitör), en yeni değil", c?.p.Key);
+
+    // Dizüstü + bilinmeyen harici monitör (aynı oranda) → Dizüstü + LG kaydı
+    var other = Mon("AUS27AF", 2560, 1440, 1920, 96, false, false);
+    c = LayoutEngine.Choose(all, DisplayInfo.KeyOf(new() { laptop, other }), new() { laptop, other });
+    Ok(c?.p == pBoth, "dizüstü + yeni monitör → dizüstü + harici kaydı", c?.p.Key);
+
+    // eski sürüm kaydı son tercih
+    var pOld = Prof(DisplayInfo.KeyOf(new() { dell }) + "x", "old", dell);
+    Ok(LayoutEngine.Similarity(pOld, new() { dell125 }) < LayoutEngine.Similarity(pDell, new() { dell125 }), "eski sürüm kaydı daha düşük puan");
+
+    Lang.Current = "tr";
+    Ok(pLaptop.Title.StartsWith("Sadece dizüstü ekranı"), "otomatik ad: Sadece dizüstü ekranı", pLaptop.Title);
+    Ok(pBoth.Title.StartsWith("Dizüstü + harici monitör"), "otomatik ad: Dizüstü + harici monitör", pBoth.Title);
+    Ok(pDell.Title.StartsWith("Sadece harici monitör") && pDell.Title.Contains("3840×2160 %150"), "otomatik ad: Sadece harici monitör + çözünürlük", pDell.Title);
+    Lang.Current = "ar";
+    Ok(pBoth.Title.StartsWith("الحاسوب المحمول"), "otomatik ad Arapça");
+    Lang.Current = "tr";
+    var legacy = new Profile { Key = "X:1920x1080@0,0~96P", Display = "Eski ekran" };
+    Ok(legacy.Title == "Eski ekran", "dahili/harici bilgisi olmayan eski kayıt eski adıyla kalır");
+    pDell.Name = "Ofis masası";
+    Ok(pDell.Title == "Ofis masası", "kullanıcı adı otomatik adı geçer");
+
+    // eşitleme: en son verilen ad kazanır, ad yoksa korunur
+    StoreData St(Profile p) { var st = new StoreData(); st.Displays[p.Key] = p; return st; }
+    Profile Clone(Profile p) => JsonSerializer.Deserialize<Profile>(JsonSerializer.Serialize(p))!;
+    var a = Clone(pDell); a.Name = "Eski ad"; a.NameUtc = DateTime.UtcNow.AddHours(-1);
+    var b = Clone(pDell); b.Name = "Yeni ad"; b.NameUtc = DateTime.UtcNow;
+    Ok(SyncMerge.Merge(St(a), St(b)).Displays[pDell.Key].Name == "Yeni ad", "eşitleme: yeni ad kazanır (uzak)");
+    Ok(SyncMerge.Merge(St(Clone(b)), St(Clone(a))).Displays[pDell.Key].Name == "Yeni ad", "eşitleme: yeni ad kazanır (yerel)");
+    var json = JsonSerializer.Serialize(St(Clone(b)));
+    Ok(JsonSerializer.Deserialize<StoreData>(json)!.Displays[pDell.Key].Monitors[0].Internal == false, "dahili/harici bilgisi kaydedilir");
+
+    // dahili bilgisi okunamayan yeni kayıt eski bilgiyi silmez
+    var st2 = St(Clone(pBoth));
+    var shape = LayoutEngine.Shape(new() { laptop with { Internal = null }, lg with { Internal = null } }, pBoth.Key, "x");
+    var snap2 = new Snapshot { SavedUtc = DateTime.UtcNow, Icons = { new IconEntry { Key = "b", X = 50, Y = 50 } } };
+    st2.Add(shape, snap2);
+    Ok(st2.Displays[pBoth.Key].Monitors.Count(m => m.Internal == true) == 1, "okunamayan dahili bilgisi öncekiyle korunur");
+    await Task.CompletedTask;
+});
+
 Console.WriteLine($"\n{pass} geçti, {fail} başarısız");
 return fail == 0 ? 0 : 1;
 

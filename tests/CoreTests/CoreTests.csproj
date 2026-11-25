@@ -14,7 +14,7 @@
   <ItemGroup>
     <Using Include="System.Drawing" />
     <Compile Include="../../src/Core/Generated.cs;../../src/Core/Look.cs;../../src/Core/CoreText.cs;../../src/Core/Fcd1.cs;../../src/Core/CoreState.cs;../../src/Core/Inbox.cs;../../src/Core/Crash.cs" LinkBase="core" />
-    <Compile Include="../../src/Storage.cs;../../src/LayoutEngine.cs;../../src/DisplayInfo.cs;../../src/Native.cs;../../src/DesktopIcons.cs;../../src/GitHubSync.cs;../../src/Updater.cs;../../src/Lang.cs" LinkBase="app" />
+    <Compile Include="../../src/Storage.cs;../../src/LayoutEngine.cs;../../src/DisplayInfo.cs;../../src/DisplayKind.cs;../../src/Native.cs;../../src/DesktopIcons.cs;../../src/GitHubSync.cs;../../src/Updater.cs;../../src/Lang.cs" LinkBase="app" />
     <Compile Include="../../tools/DeltaMaker/Ddsd1.cs" LinkBase="tools" />
   </ItemGroup>
 </Project>
