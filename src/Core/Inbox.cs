@@ -8,7 +8,7 @@ namespace DDS.Core;
 /// Admin gelen kutusu (SPEC "Admin gelen kutusu", web FC.contact ile aynı alanlar ve adres):
 /// Firestore REST comm-calc-103111111 / mesajlar (yalnız ekleme), alanlar stringValue:
 /// tur, uygulama, surum, platform, dil, mesaj, iletisim (isteğe bağlı), zaman (ISO), cihaz.
-/// Gönderilemeyen yerel kuyruğa alınır (en çok 30), sonra tekrar denenir. Kullanıcı mesajında yedek FormSubmit.
+/// Gönderilemeyen yerel kuyruğa alınır (en çok 30), sonra tekrar denenir. Programda kişisel e-posta adresi yoktur.
 /// </summary>
 public static class Inbox
 {
@@ -65,26 +65,8 @@ public static class Inbox
         return st is >= 200 and < 300;
     }
 
-    static string MailTo() => new(Encoding.UTF8.GetString(Convert.FromBase64String("")).Reverse().ToArray());
-
-    static async Task<bool> ToMail(Dictionary<string, string> f)
-    {
-        var body = new Dictionary<string, string>
-        {
-            ["_subject"] = "Desktop Simge Sabitleyici: " + f["tur"], ["_template"] = "table", ["_captcha"] = "false",
-            ["Tur"] = f["tur"], ["Mesaj"] = f["mesaj"], ["Uygulama"] = f["uygulama"], ["Surum"] = f["surum"],
-            ["Platform"] = f["platform"], ["Dil"] = f["dil"], ["Cihaz"] = f["cihaz"],
-        };
-        if (f.TryGetValue("iletisim", out var r))
-        {
-            body["Iletisim"] = r;
-            if (r.Contains('@')) body["_replyto"] = r;
-        }
-        var (_, txt) = await Post("https://formsubmit.co/ajax/" + MailTo(), JsonSerializer.Serialize(body),
-            new() { ["Accept"] = "application/json", ["Origin"] = "https://formsubmit.co", ["Referer"] = "https://formsubmit.co/" });
-        try { return JsonNode.Parse(string.IsNullOrWhiteSpace(txt) ? "{}" : txt)?["success"]?.ToString().Equals("true", StringComparison.OrdinalIgnoreCase) == true; }
-        catch { return false; }
-    }
+    /// <summary>Yedek e-posta yolu kaldırıldı: programda hiçbir kişisel adres bulunmaz; mesaj kuyrukta bekler.</summary>
+    static Task<bool> ToMail(Dictionary<string, string> f) => Task.FromResult(false);
 
     sealed class Item { public Dictionary<string, string> f { get; set; } = new(); public bool mail { get; set; } }
 

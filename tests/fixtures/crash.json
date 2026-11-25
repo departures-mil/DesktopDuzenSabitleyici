@@ -16,7 +16,7 @@
   "out": "NullReferenceException: Object reference not set to an instance of an object."
  },
  {
-  "in": "Path /home/user/x and /Users/bob/y",
+  "in": "Path /home/kullanici/x and /Users/bob/y",
   "out": "Path /home/<user>/x and /Users/<user>/y"
  },
  {

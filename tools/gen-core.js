@@ -89,7 +89,7 @@ const crashIn = [
   'mail ali.veli+x@ornek.com.tr hata 1234567 kez',
   'GET https://api.github.com/gists?per_page=100&token=abc failed',
   'NullReferenceException: Object reference not set to an instance of an object.',
-  'Path /home/user/x and /Users/bob/y',
+  'Path /home/kullanici/x and /Users/bob/y',
   'Value "kişisel veri burada" and \'ok_key\' and `x y`',
 ];
 files['tests/fixtures/crash.json'] = JSON.stringify(crashIn.map((s) => ({ in: s, out: FC.crash._sanitize(s, 600) })), null, 1) + '\n';
